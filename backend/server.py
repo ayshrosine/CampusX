@@ -53,6 +53,50 @@ class MaintenanceCreate(BaseModel):
 class MaintenanceStatus(BaseModel):
     status: str
 
+class DepartmentCreate(BaseModel):
+    name: str
+    type: str = "academic"
+    head: str = ""
+
+class CategoryCreate(BaseModel):
+    name: str
+    example_items: str = ""
+    warranty_tracked: bool = False
+    amc_tracked: bool = False
+
+class RoleChange(BaseModel):
+    role: str
+    status: str = "Active"
+
+class BookingCreate(BaseModel):
+    resource_id: str
+    date: str
+    start_time: str
+    end_time: str
+    purpose: str
+
+class AuditCreate(BaseModel):
+    department: str
+    period: str
+    auditors: List[str] = []
+
+class AuditItemUpdate(BaseModel):
+    verification: str
+    note: str = ""
+
+class NoDuesUpdate(BaseModel):
+    status: str
+    note: str = ""
+
+ROLES = {"Admin", "Asset Manager", "HOD", "Employee", "Student"}
+ROLE_PERMISSIONS = {
+    "Admin": {"admin", "asset_write", "maintenance_write", "booking", "audit", "nodues", "reports"},
+    "Asset Manager": {"asset_write", "maintenance_write", "booking", "audit", "reports"},
+    "HOD": {"asset_write", "maintenance_write", "booking", "reports"},
+    "Employee": {"maintenance_write", "booking", "reports"},
+    "Student": {"booking", "maintenance_write"},
+}
+
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
@@ -75,6 +119,13 @@ async def current_user(request: Request):
     user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
     if not user: raise HTTPException(401, "User not found")
     return user
+
+def require_permission(permission):
+    async def checker(user=Depends(current_user)):
+        if permission not in ROLE_PERMISSIONS.get(user.get("role"), set()):
+            raise HTTPException(403, f"{user.get('role', 'User')} role cannot perform this action")
+        return user
+    return checker
 
 async def log_event(user, action, entity_type, entity_id, before=None, after=None, metadata=None):
     await db.activity.insert_one({
@@ -200,10 +251,107 @@ async def update_maintenance(request_id: str, payload: MaintenanceStatus, user=D
 async def activity(user=Depends(current_user)): return [clean(x) for x in await db.activity.find({}, {"_id":0}).sort("timestamp",-1).to_list(200)]
 
 @api.get("/reports")
-async def reports(user=Depends(current_user)):
+async def reports(user=Depends(require_permission("reports"))):
     assets=[clean(x) for x in await db.assets.find({}, {"_id":0}).to_list(500)]; by_dept={}
     for a in assets: by_dept.setdefault(a["department"],{"name":a["department"],"total":0,"allocated":0}); by_dept[a["department"]]["total"]+=1; by_dept[a["department"]]["allocated"]+=a["status"]=="Allocated"
     return {"departments":list(by_dept.values()),"status_counts":{s:sum(a["status"]==s for a in assets) for s in ["Available","Allocated","Under Maintenance","Lost","Retired"]},"total":len(assets)}
+
+@api.get("/admin/departments")
+async def get_departments(user=Depends(require_permission("admin"))):
+    return [clean(x) for x in await db.departments.find({}, {"_id": 0}).sort("name", 1).to_list(100)]
+
+@api.post("/admin/departments")
+async def create_department(payload: DepartmentCreate, user=Depends(require_permission("admin"))):
+    item = {**payload.model_dump(), "department_id": f"dept_{uuid.uuid4().hex[:10]}", "status": "Active", "created_at": now_iso()}
+    await db.departments.insert_one(item); await log_event(user, "department created", "department", item["department_id"], after=item); return clean(item)
+
+@api.get("/admin/categories")
+async def get_categories(user=Depends(require_permission("admin"))):
+    return [clean(x) for x in await db.categories.find({}, {"_id": 0}).sort("name", 1).to_list(100)]
+
+@api.post("/admin/categories")
+async def create_category(payload: CategoryCreate, user=Depends(require_permission("admin"))):
+    item = {**payload.model_dump(), "category_id": f"cat_{uuid.uuid4().hex[:10]}", "created_at": now_iso()}
+    await db.categories.insert_one(item); await log_event(user, "category created", "category", item["category_id"], after=item); return clean(item)
+
+@api.get("/admin/users")
+async def get_admin_users(user=Depends(require_permission("admin"))):
+    return [{k: v for k, v in clean(x).items() if k != "password_hash"} for x in await db.users.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)]
+
+@api.patch("/admin/users/{user_id}/role")
+async def change_role(user_id: str, payload: RoleChange, user=Depends(require_permission("admin"))):
+    if payload.role not in ROLES: raise HTTPException(400, "Unknown role")
+    before = clean(await db.users.find_one({"user_id": user_id}, {"_id": 0}))
+    if not before: raise HTTPException(404, "User not found")
+    if user_id == user["user_id"] and payload.role != "Admin": raise HTTPException(400, "Admins cannot remove their own admin access")
+    await db.users.update_one({"user_id": user_id}, {"$set": {"role": payload.role, "status": payload.status}})
+    await db.user_sessions.delete_many({"user_id": user_id})
+    after = {**before, "role": payload.role, "status": payload.status}
+    await log_event(user, "role approval changed", "user", user_id, before={"role": before.get("role"), "status": before.get("status")}, after={"role": payload.role, "status": payload.status})
+    return {k: v for k, v in clean(after).items() if k != "password_hash"}
+
+@api.get("/bookings")
+async def get_bookings(date: str = "", user=Depends(current_user)):
+    query = {"date": date} if date else {}
+    return [clean(x) for x in await db.bookings.find(query, {"_id": 0}).sort([("date", 1), ("start_time", 1)]).to_list(200)]
+
+@api.post("/bookings")
+async def create_booking(payload: BookingCreate, user=Depends(require_permission("booking"))):
+    conflict = await db.bookings.find_one({"resource_id": payload.resource_id, "date": payload.date, "status": "Confirmed", "start_time": {"$lt": payload.end_time}, "end_time": {"$gt": payload.start_time}}, {"_id": 0})
+    if conflict: raise HTTPException(409, "This resource is already booked for that time")
+    item = {**payload.model_dump(), "booking_id": f"book_{uuid.uuid4().hex[:10]}", "requested_by": user["name"], "requested_by_id": user["user_id"], "status": "Confirmed", "created_at": now_iso()}
+    await db.bookings.insert_one(item); await log_event(user, "booking created", "booking", item["booking_id"], after=item); return clean(item)
+
+@api.delete("/bookings/{booking_id}")
+async def delete_booking(booking_id: str, user=Depends(require_permission("booking"))):
+    before = clean(await db.bookings.find_one({"booking_id": booking_id}, {"_id": 0}))
+    if not before: raise HTTPException(404, "Booking not found")
+    if before.get("requested_by_id") != user["user_id"] and user["role"] not in {"Admin", "Asset Manager", "HOD"}: raise HTTPException(403, "Cannot cancel another user's booking")
+    await db.bookings.delete_one({"booking_id": booking_id}); await log_event(user, "booking cancelled", "booking", booking_id, before=before); return {"ok": True}
+
+@api.get("/audits")
+async def get_audits(user=Depends(require_permission("audit"))):
+    return [clean(x) for x in await db.audits.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)]
+
+@api.post("/audits")
+async def create_audit(payload: AuditCreate, user=Depends(require_permission("audit"))):
+    assets = [clean(x) for x in await db.assets.find({"department": payload.department}, {"_id": 0}).to_list(500)]
+    item = {**payload.model_dump(), "audit_id": f"audit_{uuid.uuid4().hex[:10]}", "status": "Open", "created_at": now_iso(), "items": [{"asset_id": x["asset_id"], "tag": x["tag"], "name": x["name"], "expected_location": x["location"], "verification": "Pending", "note": ""} for x in assets]}
+    await db.audits.insert_one(item); await log_event(user, "audit cycle opened", "audit", item["audit_id"], after=item); return clean(item)
+
+@api.patch("/audits/{audit_id}/items/{asset_id}")
+async def update_audit_item(audit_id: str, asset_id: str, payload: AuditItemUpdate, user=Depends(require_permission("audit"))):
+    if payload.verification not in {"Verified", "Missing", "Damaged"}: raise HTTPException(400, "Invalid verification")
+    before = clean(await db.audits.find_one({"audit_id": audit_id}, {"_id": 0}))
+    if not before: raise HTTPException(404, "Audit cycle not found")
+    await db.audits.update_one({"audit_id": audit_id, "items.asset_id": asset_id}, {"$set": {"items.$.verification": payload.verification, "items.$.note": payload.note}})
+    after = {**before, "items": [{**x, "verification": payload.verification, "note": payload.note} if x["asset_id"] == asset_id else x for x in before["items"]]}
+    await log_event(user, "audit item verified", "audit", audit_id, before=before, after=after); return clean(after)
+
+@api.post("/audits/{audit_id}/close")
+async def close_audit(audit_id: str, user=Depends(require_permission("audit"))):
+    before = clean(await db.audits.find_one({"audit_id": audit_id}, {"_id": 0}))
+    if not before: raise HTTPException(404, "Audit cycle not found")
+    await db.audits.update_one({"audit_id": audit_id}, {"$set": {"status": "Closed", "closed_at": now_iso()}})
+    after = {**before, "status": "Closed", "closed_at": now_iso()}; await log_event(user, "audit cycle closed", "audit", audit_id, before=before, after=after); return clean(after)
+
+@api.get("/nodues")
+async def get_nodues(user=Depends(require_permission("nodues"))):
+    return [clean(x) for x in await db.nodues.find({}, {"_id": 0}).sort("student_name", 1).to_list(200)]
+
+@api.patch("/nodues/{student_id}/{department}")
+async def update_nodues(student_id: str, department: str, payload: NoDuesUpdate, user=Depends(require_permission("nodues"))):
+    before = clean(await db.nodues.find_one({"student_id": student_id}, {"_id": 0}))
+    if not before: raise HTTPException(404, "No-dues record not found")
+    statuses = [{**x, "status": payload.status, "note": payload.note} if x["department"] == department else x for x in before["department_statuses"]]
+    overall = "Cleared" if all(x["status"] == "Cleared" for x in statuses) else "In progress"
+    await db.nodues.update_one({"student_id": student_id}, {"$set": {"department_statuses": statuses, "overall_status": overall}})
+    after = {**before, "department_statuses": statuses, "overall_status": overall}; await log_event(user, "no-dues status updated", "nodues", student_id, before=before, after=after); return clean(after)
+
+@api.get("/reports/accreditation")
+async def accreditation_report(user=Depends(require_permission("reports"))):
+    assets = await db.assets.count_documents({}); events = await db.activity.count_documents({}); audits = await db.audits.count_documents({"status": "Closed"}); maintenance = await db.maintenance.count_documents({})
+    return {"title": "AssetFlow Campus Accreditation Evidence", "generated_at": now_iso(), "metrics": {"tracked_assets": assets, "audited_cycles": audits, "maintenance_records": maintenance, "activity_events": events}, "format": "NAAC/NBA-ready"}
 
 async def seed():
     if await db.assets.count_documents({}): return
@@ -214,9 +362,29 @@ async def seed():
     email="demo@assetflow.edu"
     if not await db.users.find_one({"email":email}):
         user={"user_id":"user_demo_assetflow","name":"Maya Iyer","email":email,"role":"Asset Manager","department":"Computer Science","status":"Active","picture":"","created_at":now_iso(),"password_hash":bcrypt.hashpw(b"Campus123!",bcrypt.gensalt()).decode()}; await db.users.insert_one(user)
+    if not await db.users.find_one({"email": "admin@assetflow.edu"}):
+        admin={"user_id":"user_demo_admin","name":"Rohan Kapoor","email":"admin@assetflow.edu","role":"Admin","department":"Administration","status":"Active","picture":"","created_at":now_iso(),"password_hash":bcrypt.hashpw(b"Admin123!",bcrypt.gensalt()).decode()}; await db.users.insert_one(admin)
+    if not await db.departments.count_documents({}):
+        await db.departments.insert_many([{ "department_id": f"dept_seed_{i}", "name": name, "type": "academic", "head": "", "status": "Active", "created_at": now_iso() } for i, name in enumerate(["Computer Science", "Mechanical", "Civil", "Administration", "Sports"])])
+    if not await db.categories.count_documents({}):
+        await db.categories.insert_many([{ "category_id": f"cat_seed_{i}", "name": name, "example_items": examples, "warranty_tracked": True, "amc_tracked": False, "created_at": now_iso() } for i, (name, examples) in enumerate([("IT Equipment", "Projectors, cameras, laptops"), ("Lab Equipment", "Oscilloscopes, 3D printers"), ("Sports Gear", "Bats, nets, jerseys")])])
+    if not await db.nodues.count_documents({}):
+        await db.nodues.insert_many([{ "student_id": f"student_seed_{i}", "student_name": name, "roll_number": roll, "overall_status": status, "department_statuses": [{"department": d, "status": "Cleared" if status == "Cleared" else ("Pending" if d == "Library" else "Cleared"), "note": ""} for d in ["Library", "Hostel", "Sports"]] } for i, (name, roll, status) in enumerate([("Ananya Rao", "CSE21A004", "In progress"), ("Vikram Shah", "ME22B018", "Cleared"), ("Sara Thomas", "CE21C011", "In progress")])])
+
+async def ensure_supporting_seed():
+    if not await db.users.find_one({"email": "admin@assetflow.edu"}):
+        await db.users.insert_one({"user_id":"user_demo_admin","name":"Rohan Kapoor","email":"admin@assetflow.edu","role":"Admin","department":"Administration","status":"Active","picture":"","created_at":now_iso(),"password_hash":bcrypt.hashpw(b"Admin123!",bcrypt.gensalt()).decode()})
+    if not await db.departments.count_documents({}):
+        await db.departments.insert_many([{ "department_id": f"dept_seed_{i}", "name": name, "type": "academic", "head": "", "status": "Active", "created_at": now_iso() } for i, name in enumerate(["Computer Science", "Mechanical", "Civil", "Administration", "Sports"])])
+    if not await db.categories.count_documents({}):
+        await db.categories.insert_many([{ "category_id": f"cat_seed_{i}", "name": name, "example_items": examples, "warranty_tracked": True, "amc_tracked": False, "created_at": now_iso() } for i, (name, examples) in enumerate([("IT Equipment", "Projectors, cameras, laptops"), ("Lab Equipment", "Oscilloscopes, 3D printers"), ("Sports Gear", "Bats, nets, jerseys")])])
+    if not await db.nodues.count_documents({}):
+        await db.nodues.insert_many([{ "student_id": f"student_seed_{i}", "student_name": name, "roll_number": roll, "overall_status": status, "department_statuses": [{"department": d, "status": "Cleared" if status == "Cleared" else ("Pending" if d == "Library" else "Cleared"), "note": ""} for d in ["Library", "Hostel", "Sports"]] } for i, (name, roll, status) in enumerate([("Ananya Rao", "CSE21A004", "In progress"), ("Vikram Shah", "ME22B018", "Cleared"), ("Sara Thomas", "CE21C011", "In progress")])])
 
 @app.on_event("startup")
-async def startup(): await seed()
+async def startup():
+    await seed()
+    await ensure_supporting_seed()
 @app.on_event("shutdown")
 async def shutdown(): client.close()
 app.include_router(api)

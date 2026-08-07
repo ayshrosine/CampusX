@@ -25,3 +25,22 @@ def test_reports_activity(client):
     r=client.get(BASE+'/api/activity'); assert r.status_code==200; assert any(x['action']=='asset checked out' for x in r.json())
 def test_unauthenticated_rejected():
     r=requests.get(BASE+'/api/dashboard'); assert r.status_code==401
+
+
+
+def test_admin_rbac_and_modules():
+    admin=requests.Session(); assert admin.post(BASE+'/api/auth/login',json={'email':'admin@assetflow.edu','password':'Admin123!'}).status_code==200
+    nonadmin=requests.Session(); assert nonadmin.post(BASE+'/api/auth/login',json={'email':'demo@assetflow.edu','password':'Campus123!'}).status_code==200
+    assert nonadmin.get(BASE+'/api/admin/users').status_code==403
+    suffix='TEST_MODULE_'+__import__('uuid').uuid4().hex[:6]
+    assert admin.post(BASE+'/api/admin/departments',json={'name':suffix}).status_code==200
+    assert admin.post(BASE+'/api/admin/categories',json={'name':suffix}).status_code==200
+    b={'resource_id':'ast_seed_1','date':'2099-01-01','start_time':'10:00','end_time':'11:00','purpose':suffix}
+    first=admin.post(BASE+'/api/bookings',json=b); assert first.status_code==200
+    assert admin.post(BASE+'/api/bookings',json=b).status_code==409
+    bid=first.json()['booking_id']; assert admin.delete(BASE+'/api/bookings/'+bid).status_code==200
+    audit=admin.post(BASE+'/api/audits',json={'department':'Computer Science','period':suffix,'auditors':['Rohan Kapoor']}); assert audit.status_code==200
+    aid=audit.json()['audit_id']; assert admin.post(BASE+f'/api/audits/{aid}/close').status_code==200
+    nodues=admin.get(BASE+'/api/nodues'); assert nodues.status_code==200 and nodues.json()
+    assert admin.get(BASE+'/api/reports/accreditation').json()['format']=='NAAC/NBA-ready'
+    activity=admin.get(BASE+'/api/activity'); assert activity.status_code==200 and any(x.get('action')=='booking created' for x in activity.json())
