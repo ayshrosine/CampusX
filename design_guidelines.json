@@ -1,0 +1,65 @@
+{
+  "project": "AssetFlow Campus",
+  "context": "Hybrid fullstack asset management workspace for campus operations",
+  "design_direction": "Wope-inspired research cockpit: illuminated violet accents, structured data density, calm long-session ergonomics, and an explicit light/dark theme system. Do not copy Wope branding or assume visual preferences beyond the requested reference.",
+  "discovery": {
+    "audiences": ["campus operations managers", "IT and facilities staff", "department coordinators", "auditors"],
+    "primary_tasks": ["find an asset quickly", "inspect lifecycle and history", "assign, check out, and check in assets", "move an asset through maintenance/status workflows", "review reports", "verify every action in activity logs"],
+    "success_actions": ["complete an assignment or check-in without ambiguity", "filter inventory to a useful result in under one interaction cycle", "open an asset detail and understand its current owner, status, and history", "export or inspect a trustworthy report", "see a corresponding persisted log for every mutation"],
+    "emotional_tone": "confident, precise, calm, operational; a control room rather than a flashy SaaS landing page",
+    "theme": "support light and dark modes from the first render; persist preference and respect prefers-color-scheme"
+  },
+  "research": {
+    "references": [
+      {"source": "https://wope.com/", "descriptors": ["clear product navigation with visible Pricing, Download, Contact and auth actions", "large editorial hierarchy", "feature sections built around detailed research views and track tables", "strong action-oriented copy"]},
+      {"source": "https://styles.refero.design/style/3882ed21-8ef8-4bc9-b125-7791c0f136bb", "descriptors": ["near-black violet canvas", "contrast by illumination rather than heavy shadows", "1px translucent borders", "pill controls and 16px content surfaces", "violet underlighting and blur"]},
+      {"source": "https://www.aufaitux.com/case-study/pepper/", "descriptors": ["asset/portfolio management favors structured dashboards", "data visualization supports hierarchy and scanning", "search and filtering reduce operational complexity"]}
+    ],
+    "translation": "Borrow the illuminated contrast, spacious hierarchy, and research-table clarity; translate them to campus asset workflows with stronger status semantics, auditability, and accessibility."
+  },
+  "typography": {
+    "heading": {"family": "Manrope", "weights": [500, 700, 800], "usage": "page titles, section headings, metric values", "classes": "font-manrope tracking-tight leading-none"},
+    "body": {"family": "IBM Plex Sans", "weights": [400, 500, 600], "usage": "tables, labels, helper text, forms", "classes": "font-plex"},
+    "mono": {"family": "IBM Plex Mono", "usage": "asset IDs, serials, timestamps, audit event IDs", "classes": "font-mono tracking-tight"},
+    "rules": ["H1 max text-4xl sm:text-5xl lg:text-6xl", "H2 max text-2xl sm:text-3xl lg:text-4xl", "labels uppercase text-xs tracking-[0.2em]", "body text-sm on dense tables and text-base on detail pages", "do not use Inter, Roboto, Open Sans, or Lato for headings"]
+  },
+  "colors": {
+    "archetype": "Swiss and high-contrast with an illuminated violet accent, constrained to functional actions and active states",
+    "dark": {"background": "#100d1b", "surface": "#181426", "surfaceRaised": "#211b31", "foreground": "#f5f1ff", "muted": "#aca5bd", "border": "#393247", "primary": "#7657ff", "primaryHover": "#8d74ff", "primaryForeground": "#ffffff", "success": "#38b779", "warning": "#e5a43a", "danger": "#e06464", "info": "#6ea8e8"},
+    "light": {"background": "#f7f5fb", "surface": "#ffffff", "surfaceRaised": "#f0edf8", "foreground": "#201b2b", "muted": "#686176", "border": "#ded9e8", "primary": "#5d43d8", "primaryHover": "#4932b8", "primaryForeground": "#ffffff", "success": "#147a50", "warning": "#986006", "danger": "#b43c43", "info": "#275f9e"},
+    "rules": ["Never use pure #000000 or #808080", "no full-screen gradients", "primary violet is reserved for CTAs, active navigation, focus and selected rows", "all status colors must have text/icon labels in addition to color", "use contrast-safe foregrounds; target WCAG AA minimum 4.5:1 for normal text"]
+  },
+  "visual_enhancers": {"texture": "very subtle CSS noise/grain at low opacity, aria-hidden, never behind critical text", "surfaces": "solid tinted surfaces with 1px borders; optional backdrop-blur-xl only for sticky header and dialogs with non-transparent background", "depth": "border contrast and restrained ambient shadow, not stacked floating cards", "radius": "rounded-xl for surfaces, rounded-full for compact controls and badges", "scrollbar": "custom narrow scrollbar using tinted track/thumb; no layout gutter", "iconography": "lucide-react, consistent 16/18px stroke icons; never emoji icons"},
+  "component_name": "AssetFlow Campus UI system",
+  "component_path": "/app/frontend/src/components/ui",
+  "layouts": {
+    "app_shell": "desktop: fixed left rail 248px plus content; mobile: Sheet navigation; top bar has breadcrumb, global search, theme toggle, notifications and profile",
+    "dashboard": "high-density grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4/6; summary metrics span 1; primary trend chart spans 2 and 2 rows; activity feed spans 1 and 2 rows",
+    "inventory": "toolbar above a dense table; sticky table header; filters in a Sheet/Popover; detail opens as route or wide Sheet; preserve query state in URL",
+    "detail": "asymmetric two-column desktop layout: identity and lifecycle timeline left, current assignment/actions and metadata right; mobile stacks with actions first",
+    "reports": "metric strip, chart region, table region, export controls; never rely on chart color alone",
+    "spacing": "use p-6/p-8 for bordered surfaces and py-12/py-16 between major sections; avoid cramped p-4 unless dense table cells"
+  },
+  "grids": {"dashboard_mode": "High Density Grid", "marketing_mode": "not applicable", "rules": ["mobile-first grid-cols-1", "grid children are direct children", "use h-full for neighboring dashboard widgets", "do not fill every cell if an empty offset improves scanning", "tables align numeric columns right and text columns left"]},
+  "components": {
+    "navigation": ["sidebar links: Dashboard, Inventory, Assignments, Maintenance, Reports, Activity Logs", "desktop links visible; mobile navigation uses Sheet", "active link uses violet rail/accent and explicit text color"],
+    "data": ["customized shadcn Table", "Input for search", "DropdownMenu/Select for status and location", "Popover for advanced filters", "Pagination", "empty state and skeleton state"],
+    "workflow": ["Dialog for assignment/check-in confirmation", "AlertDialog for destructive archive/delete", "Form/Input/Select/Checkbox from shadcn", "Sonner for success/error feedback", "Progress for maintenance completion"],
+    "theme": "Switch with sun/moon icons, data-testid=theme-toggle-button; never use a transparent dropdown or dialog surface"
+  },
+  "functional_ui_contract": {
+    "auth": ["email/password sign in and registration", "Google sign-in button with loading, error, and success states", "protected routes", "persist session", "all auth controls have data-testid"],
+    "asset_mutations": ["create asset", "edit asset", "assign", "check out", "check in", "change status", "schedule/complete maintenance", "archive"],
+    "activity_logging": "Every successful mutation writes one database activity event containing actorId, action, entityType, entityId, before snapshot or relevant previous value, after snapshot or relevant new value, timestamp, and metadata. Failed mutations do not create success logs; optionally write a failed-attempt event only if explicitly labeled failed.",
+    "reliability": ["disable submit while pending", "optimistic UI only for reversible visual states; server is source of truth", "refresh affected asset, counts and activity feed after mutation", "show actionable errors", "prevent duplicate submissions with request IDs or disabled state"],
+    "sample_data": "Use realistic seeded campus assets and activity logs, clearly label seed/demo data in development; do not present mocked Google auth or API data as production-ready."
+  },
+  "motion": {"entrance": "stagger rows/cards by 30-50ms with opacity and translateY only", "interaction": "transition-colors, transform, opacity, box-shadow with 150-220ms ease; never transition-all", "loading": "skeleton shimmer and button spinner", "selection": "selected table row gets tinted surface and left accent", "reduced_motion": "@media (prefers-reduced-motion: reduce) disables stagger, parallax and nonessential transforms", "decorative": "grain/illumination is aria-hidden"},
+  "accessibility": {"requirements": ["keyboard reachable navigation, tables, dialogs and menus", "visible high-contrast focus ring", "semantic headings and landmarks", "aria-label icon-only controls", "status badges include text", "announce toast/errors with Sonner or aria-live", "confirm destructive actions", "do not rely on hover-only information", "respect prefers-color-scheme and reduced motion"], "testing": "Every button, link, input, menu trigger, tab, row action, key metric, error, confirmation and balance/count must include stable kebab-case data-testid such as asset-inventory-search-input, asset-row-checkout-button, activity-log-event-row."},
+  "media": {"image_policy": "No imagery is required for the core authenticated workspace. Prefer data, iconography and subtle grain over stock photos. Do not add placeholder image URLs.", "responsive": "Any optional asset thumbnails use max-h-[80vh] md:max-h-none and object-contain; preserve alt text."},
+  "3d_libraries": {"decision": "none", "reason": "Asset operations prioritize clarity, speed and auditability; 3D would distract from dense workflows.", "steps": []},
+  "image_urls": [],
+  "implementation_steps": ["Define CSS variables for both themes in /app/frontend/src/index.css using tinted neutrals and the palette above", "replace default system heading treatment with Manrope and IBM Plex Sans/Mono via a local or approved web font import", "build the shared shell and theme persistence before pages", "implement Inventory table and asset detail first because they anchor all workflows", "wire every mutation to the API and activity log transaction", "add dashboard/report aggregates from persisted data, not hardcoded counts", "add auth route guards and Google/email states", "add loading, empty, error and success states", "run keyboard, responsive, dark/light and reduced-motion checks", "verify every interactive and key informational element has data-testid"],
+  "instructions_to_main_agent": "Implement in JavaScript/JSX files, not TSX. Use existing shadcn primitives in /app/frontend/src/components/ui and customize them rather than recreating dialogs, selects, calendars or toasts. Use Sonner for notifications. Do not use transparent headers, overlays or dropdown surfaces. Keep desktop navigation links visible. Avoid centered app containers, generic blue gradients, excessive cards, emoji icons, and universal transition rules.",
+  "GENERAL_UI_UX_DESIGN_GUIDELINES": ["Every page has visible brand/navigation context and a clear primary action", "Every mutation has pending, success and error states", "Every action that changes server state produces one accurate persisted activity log", "Use generous spacing around sections but dense readable table cells", "Keep text left-aligned for operational content; center only compact metrics when useful", "Use color as a supplement to labels and icons", "Do not hide critical controls behind hover", "Never use placeholders for missing data in production UI; show explicit empty states", "Use realistic sample data only as clearly identified seed data", "Test light and dark themes on every page", "All interactive and key informational elements must include data-testid"]
+}
