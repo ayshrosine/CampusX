@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 import os, uuid, secrets, bcrypt, logging
+from bson import ObjectId
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -56,8 +57,10 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 def clean(doc):
-    if not doc: return None
-    doc.pop("_id", None)
+    if doc is None: return None
+    if isinstance(doc, ObjectId): return str(doc)
+    if isinstance(doc, list): return [clean(item) for item in doc]
+    if isinstance(doc, dict): return {key: clean(value) for key, value in doc.items() if key != "_id"}
     return doc
 
 async def current_user(request: Request):
