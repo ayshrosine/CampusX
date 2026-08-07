@@ -29,6 +29,9 @@ Make sure every single function, every single button, and every single page shou
 - 2026-08-07: Added dashboard KPIs, inventory search/filter/register, asset detail, checkout/checkin, maintenance Kanban, reports, activity filters, theme persistence, and responsive shell.
 - 2026-08-07: Fixed recursive activity serialization, activity error handling, OAuth callback mounting, and previously inactive top-bar controls.
 
+- 2026-08-07: Added server-side non-blank validators for department/category names, booking purpose, and audit department/period fields (whitespace-only inputs now return 422).
+- 2026-08-07: Fixed `react-hooks/exhaustive-deps` warnings in Inventory and AssetDetail by wrapping `load` in `useCallback`.
+
 ## Prioritized backlog
 - P0: Add admin-only RBAC screens for organization setup, account approvals, and audit-cycle closure.
 - P1: Add resource booking calendar with overlap validation and bundled resources.

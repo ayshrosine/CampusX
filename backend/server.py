@@ -2,7 +2,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depend
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, field_validator
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
@@ -54,31 +54,72 @@ class MaintenanceStatus(BaseModel):
     status: str
 
 class DepartmentCreate(BaseModel):
-    name: str
+    name: str = Field(min_length=2, max_length=80)
     type: str = "academic"
-    head: str = ""
+    head: str = Field(default="", max_length=120)
+
+    @field_validator("name", "type", "head")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        v = (v or "").strip()
+        return v
+
+    @field_validator("name")
+    @classmethod
+    def _non_empty_name(cls, v: str) -> str:
+        if len(v) < 2:
+            raise ValueError("Department name must be at least 2 non-blank characters")
+        return v
 
 class CategoryCreate(BaseModel):
-    name: str
-    example_items: str = ""
+    name: str = Field(min_length=2, max_length=80)
+    example_items: str = Field(default="", max_length=300)
     warranty_tracked: bool = False
     amc_tracked: bool = False
+
+    @field_validator("name", "example_items")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        return (v or "").strip()
+
+    @field_validator("name")
+    @classmethod
+    def _non_empty_name(cls, v: str) -> str:
+        if len(v) < 2:
+            raise ValueError("Category name must be at least 2 non-blank characters")
+        return v
 
 class RoleChange(BaseModel):
     role: str
     status: str = "Active"
 
 class BookingCreate(BaseModel):
-    resource_id: str
-    date: str
-    start_time: str
-    end_time: str
-    purpose: str
+    resource_id: str = Field(min_length=2, max_length=80)
+    date: str = Field(min_length=8, max_length=20)
+    start_time: str = Field(min_length=4, max_length=8)
+    end_time: str = Field(min_length=4, max_length=8)
+    purpose: str = Field(min_length=3, max_length=300)
+
+    @field_validator("resource_id", "date", "start_time", "end_time", "purpose")
+    @classmethod
+    def _strip_non_empty(cls, v: str, info) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError(f"{info.field_name} cannot be blank")
+        return v
 
 class AuditCreate(BaseModel):
-    department: str
-    period: str
-    auditors: List[str] = []
+    department: str = Field(min_length=2, max_length=80)
+    period: str = Field(min_length=2, max_length=80)
+    auditors: List[str] = Field(default_factory=list)
+
+    @field_validator("department", "period")
+    @classmethod
+    def _strip_non_empty(cls, v: str, info) -> str:
+        v = (v or "").strip()
+        if len(v) < 2:
+            raise ValueError(f"{info.field_name} must be at least 2 non-blank characters")
+        return v
 
 class AuditItemUpdate(BaseModel):
     verification: str
