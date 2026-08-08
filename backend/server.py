@@ -232,6 +232,24 @@ async def login(payload: Login):
 @api.get("/auth/me")
 async def me(user=Depends(current_user)): return {k:v for k,v in user.items() if k != "password_hash"}
 
+class ProfileUpdate(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+    department: str = Field(default="", max_length=80)
+    phone: str = Field(default="", max_length=40)
+
+    @field_validator("name", "department", "phone")
+    @classmethod
+    def _strip(cls, v: str) -> str: return (v or "").strip()
+
+@api.patch("/auth/profile")
+async def update_profile(payload: ProfileUpdate, user=Depends(current_user)):
+    if len(payload.name) < 2: raise HTTPException(400, "Name must be at least 2 characters")
+    updates = {"name": payload.name, "department": payload.department or user.get("department", ""), "phone": payload.phone}
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": updates})
+    await log_event(user, "profile updated", "user", user["user_id"], after=updates)
+    fresh = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
+    return clean(fresh)
+
 @api.post("/auth/session")
 async def oauth_session(request: Request, response: Response):
     session_id = request.headers.get("X-Session-ID")

@@ -86,6 +86,7 @@ const ROLE_PERMISSIONS = {
 };
 
 const fmt = (v) => v ? new Date(v).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+const initials = (n = "") => n.split(" ").map((x) => x[0]).filter(Boolean).join("").slice(0, 2).toUpperCase();
 const fmtRelative = (v) => {
   if (!v) return "—";
   const d = new Date(v);
@@ -134,7 +135,7 @@ function AuthGate({ children }) {
   if (loading) return <div className="auth-loading">Loading AssetFlow…</div>;
   if (!user) { navHook("/login", { replace: true }); return null; }
   return (
-    <Shell user={user} onLogout={() => api("/auth/logout", { method: "POST" }).then(() => navHook("/login"))}>
+    <Shell user={user} onUserUpdate={setUser} onLogout={() => api("/auth/logout", { method: "POST" }).then(() => navHook("/login"))}>
       {children}
     </Shell>
   );
@@ -313,7 +314,81 @@ function RolePreviewModal({ onClose }) {
 /* ============================================================
    Shell
    ============================================================ */
-function Shell({ user, onLogout, children }) {
+function GlobalSearch({ onClose }) {
+  const [q, setQ] = useState("");
+  const [assets, setAssets] = useState([]);
+  const navigate = useNavigate();
+  useEffect(() => {
+    const id = setTimeout(() => {
+      if (q.trim().length >= 1) api(`/assets?search=${encodeURIComponent(q.trim())}`).then((a) => setAssets(a.slice(0, 8))).catch(() => {});
+      else setAssets([]);
+    }, 200);
+    return () => clearTimeout(id);
+  }, [q]);
+  const pages = q ? nav.filter((n) => n.label.toLowerCase().includes(q.toLowerCase())) : [];
+  const go = (to) => { navigate(to); onClose(); };
+  return (
+    <div className="modal-backdrop search-backdrop" onClick={onClose} data-testid="global-search-overlay">
+      <div className="search-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="search-input-row">
+          <Search size={16} />
+          <input autoFocus data-testid="global-search-input" placeholder="Search assets and pages…" value={q} onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { if (assets[0]) go(`/inventory/${assets[0].asset_id}`); else if (pages[0]) go(pages[0].to); } if (e.key === "Escape") onClose(); }} />
+          <button className="icon-btn" onClick={onClose} aria-label="Close"><X size={16} /></button>
+        </div>
+        <div className="search-results">
+          {pages.length > 0 && <div className="search-group">Pages</div>}
+          {pages.map((p) => <button key={p.to} className="search-item" data-testid="search-result-page" onClick={() => go(p.to)}><p.icon size={15} /> <span><b>{p.label}</b></span></button>)}
+          {assets.length > 0 && <div className="search-group">Assets</div>}
+          {assets.map((a) => <button key={a.asset_id} className="search-item" data-testid="search-result-asset" onClick={() => go(`/inventory/${a.asset_id}`)}><Package size={15} /> <span><b>{a.name}</b><small>{a.tag} · {a.location}</small></span></button>)}
+          {q && assets.length === 0 && pages.length === 0 && <div className="search-empty">No matches for &ldquo;{q}&rdquo;</div>}
+          {!q && <div className="search-empty">Type to search assets and jump to pages…</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProfileMenu({ user, onEdit, onLogout }) {
+  return (
+    <div className="profile-menu" data-testid="profile-menu" onClick={(e) => e.stopPropagation()}>
+      <div className="profile-head">
+        <span className="avatar-lg">{initials(user.name)}</span>
+        <div className="profile-head-info"><b>{user.name}</b><small>{user.email}</small><span className="role-tag">{user.role}</span></div>
+      </div>
+      <button className="profile-item" data-testid="profile-edit-button" onClick={onEdit}><User size={15} /> Edit profile</button>
+      <button className="profile-item danger" data-testid="profile-logout-button" onClick={onLogout}><LogOut size={15} /> Log out</button>
+    </div>
+  );
+}
+
+function ProfileModal({ user, onClose, onSaved }) {
+  const [form, setForm] = useState({ name: user.name || "", department: user.department || "", phone: user.phone || "" });
+  const [busy, setBusy] = useState(false);
+  const save = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try { const u = await api("/auth/profile", { method: "PATCH", body: JSON.stringify(form) }); toast.success("Profile updated"); onSaved(u); }
+    catch (err) { toast.error(err.message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} data-testid="profile-modal">
+        <div className="modal-title"><div><p className="eyebrow">MY PROFILE</p><h2>Edit profile</h2></div><button className="icon-btn" onClick={onClose} aria-label="Close" data-testid="profile-modal-close"><X size={16} /></button></div>
+        <form onSubmit={save}>
+          <div className="nb-field"><label>Full name</label><input data-testid="profile-name-input" className="nb-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required minLength={2} /></div>
+          <div className="nb-field"><label>Department</label><input data-testid="profile-department-input" className="nb-input" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} placeholder="e.g. Computer Science" /></div>
+          <div className="nb-field"><label>Phone</label><input data-testid="profile-phone-input" className="nb-input" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Contact number" /></div>
+          <div className="nb-field"><label>Email (read-only)</label><input className="nb-input" value={user.email} disabled /></div>
+          <div className="nb-field"><label>Role (set by admin)</label><input className="nb-input" value={user.role} disabled /></div>
+          <button className="primary-btn nb-confirm" data-testid="profile-save-button" disabled={busy} type="submit">{busy ? "Saving…" : "Save changes"}</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function Shell({ user, onLogout, onUserUpdate, children }) {
   const [dark, setDark] = useState(localStorage.theme === "dark" || (!localStorage.theme && matchMedia("(prefers-color-scheme: dark)").matches));
   const [mobile, setMobile] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -330,6 +405,17 @@ function Shell({ user, onLogout, children }) {
   }, []);
 
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setSearchOpen(true); }
+      if (e.key === "Escape") setSearchOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const visibleNav = nav.filter((x) => !x.perm || (ROLE_PERMISSIONS[previewRole] || new Set()).has(x.perm));
 
   return (
@@ -367,19 +453,29 @@ function Shell({ user, onLogout, children }) {
           <button data-testid="mobile-menu-button" className="icon-btn mobile-menu" onClick={() => setMobile(true)}><Menu size={16} /></button>
           <div className="breadcrumbs"><span>Workspace</span><ChevronRight size={12} /><strong>{window.location.pathname.split("/")[1] || "Dashboard"}</strong>{rolePreviewFor && <span className="role-badge"><Eye size={11} /> Previewing {rolePreviewFor}</span>}</div>
           <div className="top-actions">
-            <button data-testid="global-search-button" className="search-trigger" onClick={() => toast.info("Search is available from Inventory")}><Search size={13} /> Search <kbd>⌘K</kbd></button>
+            <button data-testid="global-search-button" className="search-trigger" onClick={() => setSearchOpen(true)}><Search size={13} /> Search <kbd>⌘K</kbd></button>
             <ThemeToggleButton dark={dark} setDark={setDark} className="icon-btn" />
             <button data-testid="notifications-button" className="icon-btn" onClick={() => setNotifOpen(true)} aria-label="Notifications">
               <Bell size={16} />
               {unread > 0 && <span className="badge" data-testid="notifications-badge">{unread}</span>}
             </button>
-            <div className="user-chip"><span>{user.name.split(" ").map((x) => x[0]).join("").slice(0, 2)}</span><div><b>{user.name}</b><small>{user.role}</small></div></div>
+            <div className="user-menu">
+              <button data-testid="profile-button" className="user-chip" onClick={(e) => { e.stopPropagation(); setProfileOpen((o) => !o); }}>
+                <span>{initials(user.name)}</span><div><b>{user.name}</b><small>{user.role}</small></div>
+              </button>
+              {profileOpen && (<>
+                <div className="menu-scrim" onClick={() => setProfileOpen(false)} />
+                <ProfileMenu user={user} onEdit={() => { setEditOpen(true); setProfileOpen(false); }} onLogout={onLogout} />
+              </>)}
+            </div>
           </div>
         </header>
         <main className="page-content">{children}</main>
       </section>
       <Notifications user={user} open={notifOpen} onClose={() => setNotifOpen(false)} />
       {previewOpen && <RolePreviewModal onClose={() => setPreviewOpen(false)} />}
+      {searchOpen && <GlobalSearch onClose={() => setSearchOpen(false)} />}
+      {editOpen && <ProfileModal user={user} onClose={() => setEditOpen(false)} onSaved={(u) => { onUserUpdate && onUserUpdate(u); setEditOpen(false); }} />}
     </div>
   );
 }
@@ -1109,6 +1205,44 @@ function NoDues() {
   );
 }
 
+function AccessControlPanel({ users, reload }) {
+  const [q, setQ] = useState("");
+  const apply = async (u, role, status) => {
+    try { await api(`/admin/users/${u.user_id}/role`, { method: "PATCH", body: JSON.stringify({ role, status }) }); toast.success(`Updated ${u.name} → ${role}`); reload(); }
+    catch (e) { toast.error(e.message); }
+  };
+  const filtered = users.filter((u) => [u.name, u.email, u.department, u.role, u.status].join(" ").toLowerCase().includes(q.toLowerCase()));
+  return (
+    <section className="surface" data-testid="access-control-panel" style={{ marginTop: 16 }}>
+      <div className="section-title"><div><p className="eyebrow">ACCESS CONTROL</p><h3>Set any user&rsquo;s role &amp; access</h3></div><small className="muted">{filtered.length} of {users.length} users</small></div>
+      <div className="ac-search"><Search size={15} /><input data-testid="access-search-input" placeholder="Search users by name, email, department, role or status…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+      <div className="ac-list">
+        {filtered.length === 0 && <div className="empty">No users match &ldquo;{q}&rdquo;.</div>}
+        {filtered.map((u) => {
+          const isRootAdmin = u.email === "admin@assetflow.edu";
+          return (
+            <div className="ac-row" data-testid="access-user-row" key={u.user_id}>
+              <div className="ac-user"><span className="avatar-sm">{initials(u.name)}</span><div><b>{u.name}</b><small>{u.email} · {u.department || "—"}</small></div></div>
+              <div className="ac-controls">
+                <label className="ac-field"><span>Role</span>
+                  <select data-testid="access-role-select" value={u.role} disabled={isRootAdmin} onChange={(e) => apply(u, e.target.value, u.status || "Active")}>
+                    <option>Student</option><option>Employee</option><option>HOD</option><option>Asset Manager</option><option>Admin</option>
+                  </select>
+                </label>
+                <label className="ac-field"><span>Status</span>
+                  <select data-testid="access-status-select" value={u.status || "Active"} disabled={isRootAdmin} onChange={(e) => apply(u, u.role, e.target.value)}>
+                    <option>Active</option><option>Pending</option><option>Suspended</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function Admin() {
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
@@ -1211,6 +1345,7 @@ function Admin() {
           </div>
         )}
       </section>
+      <AccessControlPanel users={users} reload={load} />
       <section className="surface">
         <div className="section-title"><div><p className="eyebrow">ROLE APPROVAL QUEUE</p><h3>Pending & recently changed</h3></div></div>
         {users.filter((x) => x.email !== "admin@assetflow.edu").map((u) => (
