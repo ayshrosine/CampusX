@@ -55,6 +55,28 @@ async function uploadToCloudinary(file, folder) {
   return { public_id: data.public_id, secure_url: data.secure_url, width: data.width, height: data.height };
 }
 
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const b = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = window.atob(b);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+async function ensurePushSubscription() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) throw new Error("Push not supported on this browser");
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") throw new Error("Notifications permission was denied");
+  const reg = await navigator.serviceWorker.register("/sw.js");
+  await navigator.serviceWorker.ready;
+  const existing = await reg.pushManager.getSubscription();
+  if (existing) return existing;
+  const { key } = await api("/push/public-key");
+  if (!key) throw new Error("Push server key not configured");
+  return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) });
+}
+
 const ROLE_PERMISSIONS = {
   Admin: new Set(["admin", "asset_write", "maintenance_write", "booking", "audit", "nodues", "reports"]),
   "Asset Manager": new Set(["asset_write", "maintenance_write", "booking", "audit", "reports"]),
@@ -183,12 +205,25 @@ function Login() {
    ============================================================ */
 function Notifications({ user, open, onClose }) {
   const [data, setData] = useState({ items: [], unread: 0 });
+  const [pushOn, setPushOn] = useState(false);
   const navHook = useNavigate();
   useEffect(() => {
     if (!open) return;
     api("/notifications").then(setData).catch((e) => toast.error(e.message));
     api("/notifications/mark-all-read", { method: "POST" }).catch(() => {});
+    if ("serviceWorker" in navigator && "PushManager" in window) {
+      navigator.serviceWorker.getRegistration().then((reg) => reg?.pushManager?.getSubscription().then((s) => setPushOn(!!s)));
+    }
   }, [open]);
+  const enablePush = async () => {
+    try {
+      const sub = await ensurePushSubscription();
+      const json = sub.toJSON();
+      await api("/push/subscribe", { method: "POST", body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys }) });
+      setPushOn(true);
+      toast.success("Browser push enabled");
+    } catch (e) { toast.error(e.message); }
+  };
   if (!open) return null;
   const kindIcons = { maintenance: <Wrench size={14} />, booking: <Clock3 size={14} />, approval: <Users size={14} />, audit: <ClipboardCheck size={14} /> };
   return (
@@ -197,7 +232,12 @@ function Notifications({ user, open, onClose }) {
       <div className="notif-drawer" data-testid="notifications-drawer">
         <div className="notif-head">
           <h3>Notifications</h3>
-          <button className="icon-btn" style={{ width: 28, height: 28 }} onClick={onClose} aria-label="Close notifications"><X size={14} /></button>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            {!pushOn && ("Notification" in window) && (
+              <button data-testid="enable-push-button" className="advance-btn" style={{ width: "auto", padding: "6px 10px", marginTop: 0 }} onClick={enablePush}><Bell size={12} /> Enable push</button>
+            )}
+            <button className="icon-btn" style={{ width: 28, height: 28 }} onClick={onClose} aria-label="Close notifications"><X size={14} /></button>
+          </div>
         </div>
         <div className="notif-body">
           {data.items.length === 0 ? (
@@ -214,7 +254,7 @@ function Notifications({ user, open, onClose }) {
           ))}
         </div>
         <div className="notif-foot">
-          <small style={{ color: "var(--mute)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{data.items.length} items</small>
+          <small style={{ color: "var(--mute)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{data.items.length} items · push {pushOn ? "on" : "off"}</small>
           <button className="link-btn" onClick={() => { onClose(); navHook("/activity"); }}>View all activity <ArrowRight size={13} /></button>
         </div>
       </div>
@@ -919,8 +959,20 @@ function Audits() {
             </div>
           ))}
           {a.status === "Open" && (
-            <button data-testid="audit-close-button" className="secondary-btn compact" style={{ marginTop: 12 }} onClick={async () => { await api(`/audits/${a.audit_id}/close`, { method: "POST" }); toast.success("Audit cycle closed"); load(); }}>Close audit cycle</button>
+            <button data-testid="audit-close-button" className="secondary-btn compact" style={{ marginTop: 12, marginRight: 8 }} onClick={async () => { await api(`/audits/${a.audit_id}/close`, { method: "POST" }); toast.success("Audit cycle closed"); load(); }}>Close audit cycle</button>
           )}
+          <button data-testid="audit-download-pdf" className="primary-btn compact" style={{ marginTop: 12 }} onClick={async () => {
+            try {
+              const res = await fetch(`${API}/audits/${a.audit_id}/pdf`, { credentials: "include" });
+              if (!res.ok) throw new Error("Download failed");
+              const blob = await res.blob();
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement("a"); link.href = url; link.download = `audit_${a.audit_id}.pdf`;
+              document.body.appendChild(link); link.click(); link.remove();
+              URL.revokeObjectURL(url);
+              toast.success("Audit PDF downloaded");
+            } catch (e) { toast.error(e.message); }
+          }}><Download size={13} /> Download PDF</button>
         </section>
       ))}
       {!items.length && <div className="empty">No audit cycles yet. Open the first one above.</div>}
@@ -1073,6 +1125,8 @@ function Admin() {
         ))}
       </section>
       <BrandingPanel />
+      <DelegationsPanel users={users} />
+      <BulkImportPanel />
     </>
   );
 }
@@ -1304,6 +1358,108 @@ function BrandingPanel() {
           </div>
         </div>
       </div>
+    </section>
+  );
+}
+
+/* ============================================================
+   Delegation slots (admin only)
+   ============================================================ */
+function DelegationsPanel({ users }) {
+  const [items, setItems] = useState([]);
+  const [form, setForm] = useState({ deputy_id: "", start_at: new Date().toISOString().slice(0, 16), end_at: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 16), note: "" });
+  const load = useCallback(() => api("/admin/delegations").then(setItems).catch((e) => toast.error(e.message)), []);
+  useEffect(() => { load(); }, [load]);
+  const create = async () => {
+    if (!form.deputy_id) { toast.error("Pick a deputy"); return; }
+    try {
+      await api("/admin/delegations", { method: "POST", body: JSON.stringify({ ...form, start_at: new Date(form.start_at).toISOString(), end_at: new Date(form.end_at).toISOString() }) });
+      toast.success("Delegation scheduled"); load();
+    } catch (e) { toast.error(e.message); }
+  };
+  const revoke = async (d) => {
+    if (!window.confirm(`Revoke delegation to ${d.deputy_name}?`)) return;
+    try {
+      await api(`/admin/delegations/${d.delegation_id}`, { method: "DELETE" });
+      toast.success("Delegation revoked"); load();
+    } catch (e) { toast.error(e.message); }
+  };
+  const staffOptions = users.filter((u) => u.status === "Active" && u.role !== "Admin");
+  return (
+    <section className="surface" data-testid="delegations-panel" style={{ marginTop: 16 }}>
+      <div className="section-title"><div><p className="eyebrow">DELEGATION SLOTS</p><h3>Hand off approvals</h3></div></div>
+      <p className="muted" style={{ marginBottom: 12 }}>Give a trusted deputy Admin permissions for a fixed time window — perfect when you’re travelling or on leave.</p>
+      <div className="delegation-form">
+        <label>Deputy
+          <select data-testid="delegation-deputy" value={form.deputy_id} onChange={(e) => setForm({ ...form, deputy_id: e.target.value })}>
+            <option value="">Pick a colleague…</option>
+            {staffOptions.map((u) => <option key={u.user_id} value={u.user_id}>{u.name} · {u.role}</option>)}
+          </select>
+        </label>
+        <label>Start<input data-testid="delegation-start" type="datetime-local" value={form.start_at} onChange={(e) => setForm({ ...form, start_at: e.target.value })} /></label>
+        <label>End<input data-testid="delegation-end" type="datetime-local" value={form.end_at} onChange={(e) => setForm({ ...form, end_at: e.target.value })} /></label>
+        <label>Note<input data-testid="delegation-note" placeholder="Reason (optional)" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
+        <button data-testid="delegation-create" className="primary-btn compact" onClick={create}><Plus size={13} /> Schedule</button>
+      </div>
+      {items.length === 0 ? <div className="empty">No delegations scheduled.</div> : items.map((d) => (
+        <div data-testid="delegation-row" className="report-row" key={d.delegation_id}>
+          <div><b>{d.deputy_name}</b><small>{new Date(d.start_at).toLocaleString()} → {new Date(d.end_at).toLocaleString()}{d.note ? " · " + d.note : ""}</small></div>
+          <Status>{d.status}</Status>
+          {d.status !== "Revoked" && <button data-testid="delegation-revoke" className="advance-btn" style={{ width: "auto", marginTop: 0, padding: "4px 10px" }} onClick={() => revoke(d)}><X size={12} /> Revoke</button>}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+/* ============================================================
+   Bulk CSV import (admin only)
+   ============================================================ */
+function BulkImportPanel() {
+  const [kind, setKind] = useState("assets");
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef(null);
+  const templates = {
+    assets: "name,category,location,department,tag,serial\nProjector,IT Equipment,Room 101,Computer Science,,\nLathe,Workshop Machinery,Workshop A,Mechanical,,",
+    students: "name,email,roll_number,department\nMeera Nair,meera@campus.edu,CS22A45,Computer Science\nRahul Verma,rahul@campus.edu,ME22B12,Mechanical",
+  };
+  const copyTemplate = () => { navigator.clipboard.writeText(templates[kind]); toast.success("Template copied"); };
+  const upload = async () => {
+    const file = fileRef.current?.files?.[0];
+    if (!file) { toast.error("Pick a CSV first"); return; }
+    setBusy(true); setResult(null);
+    try {
+      const body = await file.text();
+      const res = await fetch(`${API}/admin/imports/${kind}`, { method: "POST", credentials: "include", headers: { "Content-Type": "text/csv" }, body });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Import failed");
+      setResult(data);
+      toast.success(`Imported ${data.created} · skipped ${data.skipped}`);
+    } catch (e) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <section className="surface" data-testid="bulk-import-panel" style={{ marginTop: 16 }}>
+      <div className="section-title"><div><p className="eyebrow">BULK IMPORT</p><h3>Drop a CSV to onboard many at once</h3></div><button data-testid="bulk-copy-template" className="link-btn" onClick={copyTemplate}>Copy template <ArrowRight size={12} /></button></div>
+      <div className="inline-form" style={{ marginBottom: 10 }}>
+        <select data-testid="bulk-kind" value={kind} onChange={(e) => setKind(e.target.value)}>
+          <option value="assets">Assets</option>
+          <option value="students">Students</option>
+        </select>
+        <input data-testid="bulk-file" ref={fileRef} type="file" accept=".csv,text/csv" />
+        <button data-testid="bulk-upload" className="primary-btn compact" disabled={busy} onClick={upload}><Upload size={13} /> {busy ? "Uploading…" : "Import"}</button>
+      </div>
+      {result && (
+        <div className="bulk-result" data-testid="bulk-result">
+          <p className="eyebrow">Result · {result.created} created · {result.skipped} skipped</p>
+          {result.rows.slice(0, 30).map((r) => (
+            <div className="simple-row" key={r.row} data-testid="bulk-result-row">
+              <b>Row {r.row}: {r.status}</b>
+              <small>{r.message || r.name || r.asset_id || r.user_id || ""}</small>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

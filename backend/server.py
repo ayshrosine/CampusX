@@ -167,6 +167,13 @@ async def current_user(request: Request):
     if expires < datetime.now(timezone.utc): raise HTTPException(401, "Session expired")
     user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
     if not user: raise HTTPException(401, "User not found")
+    # Honor active delegation slot: elevate deputy to Admin during window
+    now_ts = datetime.now(timezone.utc).isoformat()
+    active = await db.delegations.find_one({"deputy_id": user["user_id"], "status": "Scheduled", "start_at": {"$lte": now_ts}, "end_at": {"$gte": now_ts}}, {"_id": 0})
+    if active:
+        user["role"] = "Admin"
+        user["_delegation_id"] = active["delegation_id"]
+        user["_delegated_from"] = active.get("admin_name")
     return user
 
 def require_permission(permission):
@@ -293,7 +300,11 @@ async def maintenance(user=Depends(current_user)):
 
 @api.post("/maintenance")
 async def create_maintenance(payload: MaintenanceCreate, user=Depends(require_permission("maintenance_write"))):
-    item={**payload.model_dump(),"request_id":f"mnt_{uuid.uuid4().hex[:10]}","raised_by":user["name"],"raised_by_id":user["user_id"],"status":"Pending","created_at":now_iso()}; await db.maintenance.insert_one(item); await log_event(user,"maintenance request raised","maintenance",item["request_id"],after=item); return clean(item)
+    item={**payload.model_dump(),"request_id":f"mnt_{uuid.uuid4().hex[:10]}","raised_by":user["name"],"raised_by_id":user["user_id"],"status":"Pending","created_at":now_iso()}; await db.maintenance.insert_one(item); await log_event(user,"maintenance request raised","maintenance",item["request_id"],after=item)
+    if payload.priority == "High":
+        try: await send_push_to_role(["Admin", "Asset Manager", "HOD"], "High-priority maintenance", f"{item['description'][:80]} · {item['asset_id']}", "/maintenance")
+        except Exception as _e: pass
+    return clean(item)
 
 @api.patch("/maintenance/{request_id}")
 async def update_maintenance(request_id: str, payload: MaintenanceStatus, user=Depends(require_permission("maintenance_write"))):
@@ -664,6 +675,167 @@ async def update_branding(payload: BrandingUpdate, user=Depends(require_permissi
     await db.branding.update_one({"_id": "singleton"}, {"$set": {**data, "updated_at": now_iso(), "updated_by": user["name"]}}, upsert=True)
     await log_event(user, "branding updated", "branding", "singleton", after=data)
     return {**BRANDING_DEFAULT, **data}
+
+# --- Web push notifications ---
+class PushSub(BaseModel):
+    endpoint: str = Field(min_length=10, max_length=800)
+    keys: dict
+
+@api.get("/push/public-key")
+async def push_public_key():
+    return {"key": os.environ.get("VAPID_PUBLIC_KEY", "")}
+
+@api.post("/push/subscribe")
+async def push_subscribe(payload: PushSub, user=Depends(current_user)):
+    await db.push_subs.update_one(
+        {"endpoint": payload.endpoint},
+        {"$set": {"endpoint": payload.endpoint, "keys": payload.keys, "user_id": user["user_id"], "user_name": user.get("name"), "role": user.get("role"), "created_at": now_iso()}},
+        upsert=True,
+    )
+    return {"ok": True}
+
+@api.post("/push/unsubscribe")
+async def push_unsubscribe(payload: PushSub, user=Depends(current_user)):
+    await db.push_subs.delete_one({"endpoint": payload.endpoint, "user_id": user["user_id"]})
+    return {"ok": True}
+
+async def send_push_to_role(roles: List[str], title: str, body: str, url: str = "/dashboard"):
+    priv = os.environ.get("VAPID_PRIVATE_KEY"); pub = os.environ.get("VAPID_PUBLIC_KEY"); subj = os.environ.get("VAPID_SUBJECT")
+    if not priv or not pub: return 0
+    import json as _json
+    try: from pywebpush import webpush, WebPushException
+    except Exception: return 0
+    sent = 0
+    async for sub in db.push_subs.find({"role": {"$in": roles}}, {"_id": 0}):
+        try:
+            webpush(subscription_info={"endpoint": sub["endpoint"], "keys": sub["keys"]}, data=_json.dumps({"title": title, "body": body, "url": url}), vapid_private_key=priv, vapid_claims={"sub": subj or "mailto:admin@example.com"})
+            sent += 1
+        except WebPushException as e:
+            if getattr(e, "response", None) is not None and e.response.status_code in (404, 410):
+                await db.push_subs.delete_one({"endpoint": sub["endpoint"]})
+        except Exception: pass
+    return sent
+
+# --- Delegation slots ---
+class DelegationCreate(BaseModel):
+    deputy_id: str = Field(min_length=3, max_length=80)
+    start_at: str = Field(min_length=10, max_length=40)
+    end_at: str = Field(min_length=10, max_length=40)
+    note: str = Field(default="", max_length=200)
+
+    @field_validator("deputy_id", "start_at", "end_at", "note")
+    @classmethod
+    def _strip(cls, v: str) -> str: return (v or "").strip()
+
+@api.get("/admin/delegations")
+async def list_delegations(user=Depends(require_permission("admin"))):
+    return [clean(x) for x in await db.delegations.find({}, {"_id": 0}).sort("start_at", -1).to_list(200)]
+
+@api.post("/admin/delegations")
+async def create_delegation(payload: DelegationCreate, user=Depends(require_permission("admin"))):
+    try: sa = datetime.fromisoformat(payload.start_at); ea = datetime.fromisoformat(payload.end_at)
+    except Exception: raise HTTPException(400, "start_at and end_at must be ISO datetimes")
+    if ea <= sa: raise HTTPException(400, "end_at must be after start_at")
+    deputy = await db.users.find_one({"user_id": payload.deputy_id}, {"_id": 0, "password_hash": 0})
+    if not deputy: raise HTTPException(404, "Deputy user not found")
+    if deputy["user_id"] == user["user_id"]: raise HTTPException(400, "Cannot delegate to yourself")
+    item = {"delegation_id": f"deleg_{uuid.uuid4().hex[:10]}", "admin_id": user["user_id"], "admin_name": user.get("name"), "deputy_id": deputy["user_id"], "deputy_name": deputy.get("name"), "deputy_original_role": deputy.get("role"), "start_at": payload.start_at, "end_at": payload.end_at, "note": payload.note, "status": "Scheduled", "created_at": now_iso()}
+    await db.delegations.insert_one(item)
+    await log_event(user, "delegation scheduled", "delegation", item["delegation_id"], after=item)
+    return clean(item)
+
+@api.delete("/admin/delegations/{delegation_id}")
+async def revoke_delegation(delegation_id: str, user=Depends(require_permission("admin"))):
+    before = clean(await db.delegations.find_one({"delegation_id": delegation_id}, {"_id": 0}))
+    if not before: raise HTTPException(404, "Delegation not found")
+    await db.delegations.update_one({"delegation_id": delegation_id}, {"$set": {"status": "Revoked", "revoked_at": now_iso()}})
+    await log_event(user, "delegation revoked", "delegation", delegation_id, before=before)
+    return {"ok": True}
+
+# --- Bulk CSV import ---
+@api.post("/admin/imports/{kind}")
+async def bulk_import(kind: str, request: Request, user=Depends(require_permission("admin"))):
+    if kind not in {"assets", "students"}: raise HTTPException(400, "kind must be 'assets' or 'students'")
+    import csv, io as _io
+    body = (await request.body()).decode("utf-8", errors="replace")
+    if not body.strip(): raise HTTPException(400, "Empty CSV")
+    reader = csv.DictReader(_io.StringIO(body))
+    if reader.fieldnames is None: raise HTTPException(400, "CSV missing header row")
+    headers = [h.strip().lower() for h in (reader.fieldnames or [])]
+    rows_out = []; created = 0; skipped = 0
+    if kind == "assets":
+        required = {"name", "category", "location", "department"}
+        if not required.issubset(headers): raise HTTPException(400, f"CSV needs columns: {sorted(required)}")
+        for i, raw in enumerate(reader, start=2):
+            row = {k.strip().lower(): (v or "").strip() for k, v in raw.items()}
+            missing = [c for c in required if not row.get(c)]
+            if missing: rows_out.append({"row": i, "status": "error", "message": f"missing: {', '.join(missing)}"}); skipped += 1; continue
+            asset = {"asset_id": f"ast_{uuid.uuid4().hex[:10]}", "name": row["name"], "category": row["category"], "location": row["location"], "department": row["department"], "status": row.get("status") or "Available", "tag": row.get("tag") or f"AF-{datetime.now().year}-{secrets.randbelow(9000)+1000}", "serial": row.get("serial") or f"SN-{uuid.uuid4().hex[:8].upper()}", "bookable": (row.get("bookable", "").lower() in {"1", "true", "yes"}), "updated_at": now_iso(), "created_at": now_iso()}
+            await db.assets.insert_one(asset)
+            rows_out.append({"row": i, "status": "created", "asset_id": asset["asset_id"], "name": asset["name"]}); created += 1
+    else:
+        required = {"name", "email", "roll_number", "department"}
+        if not required.issubset(headers): raise HTTPException(400, f"CSV needs columns: {sorted(required)}")
+        for i, raw in enumerate(reader, start=2):
+            row = {k.strip().lower(): (v or "").strip() for k, v in raw.items()}
+            missing = [c for c in required if not row.get(c)]
+            if missing: rows_out.append({"row": i, "status": "error", "message": f"missing: {', '.join(missing)}"}); skipped += 1; continue
+            if "@" not in row["email"] or "." not in row["email"]: rows_out.append({"row": i, "status": "error", "message": "invalid email"}); skipped += 1; continue
+            if await db.users.find_one({"email": row["email"]}, {"_id": 0}):
+                rows_out.append({"row": i, "status": "skipped", "message": "email already exists"}); skipped += 1; continue
+            student = {"user_id": f"user_{uuid.uuid4().hex[:12]}", "name": row["name"], "email": row["email"], "role": "Student", "department": row["department"], "status": "Pending", "picture": "", "created_at": now_iso(), "roll_number": row["roll_number"], "password_hash": bcrypt.hashpw(secrets.token_urlsafe(12).encode(), bcrypt.gensalt()).decode()}
+            await db.users.insert_one(student)
+            rows_out.append({"row": i, "status": "created", "user_id": student["user_id"], "name": student["name"]}); created += 1
+    await log_event(user, f"bulk imported {kind}", "import", kind, metadata={"created": created, "skipped": skipped})
+    return {"kind": kind, "created": created, "skipped": skipped, "rows": rows_out}
+
+# --- Audit PDF with photo grid ---
+@api.get("/audits/{audit_id}/pdf")
+async def audit_pdf(audit_id: str, user=Depends(require_permission("audit"))):
+    from fastapi.responses import StreamingResponse
+    import io, urllib.request, tempfile
+    audit = await db.audits.find_one({"audit_id": audit_id}, {"_id": 0})
+    if not audit: raise HTTPException(404, "Audit not found")
+    brand = {**BRANDING_DEFAULT, **{k: v for k, v in ((await db.branding.find_one({"_id": "singleton"})) or {}).items() if k != "_id"}}
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak
+    try: accent = colors.HexColor(brand.get("accent_color") or "#171717")
+    except Exception: accent = colors.HexColor("#171717")
+    buf = io.BytesIO(); doc = SimpleDocTemplate(buf, pagesize=A4, title=f"Audit {audit_id}")
+    styles = getSampleStyleSheet()
+    story = [Paragraph(brand.get("accreditation_body") or "AUDIT REPORT", ParagraphStyle("eb", parent=styles["Normal"], textColor=colors.HexColor("#8f8f8f"), fontSize=10)), Paragraph(brand.get("institution_name") or "AssetFlow Campus", ParagraphStyle("t", parent=styles["Title"], textColor=accent, fontSize=26, spaceAfter=6)), Paragraph(f"{audit['department']} · {audit['period']}", styles["Heading2"]), Paragraph(f"Cycle ID: {audit_id} · Status: {audit.get('status')} · Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", styles["Normal"]), Spacer(1, 18)]
+    verify_rows = [["Asset", "Tag", "Expected location", "Verification", "Note"]] + [[i["name"], i["tag"], i["expected_location"], i.get("verification", "Pending"), i.get("note", "")] for i in audit.get("items", [])]
+    t = Table(verify_rows, colWidths=[130, 80, 130, 70, 90], repeatRows=1)
+    t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),accent),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),9),("GRID",(0,0),(-1,-1),0.3,colors.HexColor("#ebebeb")),("VALIGN",(0,0),(-1,-1),"MIDDLE"),("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5)]))
+    story.append(t)
+    photo_items = [(i, p) for i in audit.get("items", []) for p in (i.get("photos") or [])]
+    if photo_items:
+        story.append(PageBreak())
+        story.append(Paragraph("Evidence photos", styles["Heading2"]))
+        story.append(Spacer(1, 10))
+        cells = []; row = []
+        for it, ph in photo_items:
+            try:
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".img")
+                with urllib.request.urlopen(ph["url"], timeout=6) as r: tmp.write(r.read())
+                tmp.close()
+                cell = [Image(tmp.name, width=52*mm, height=52*mm, kind="proportional"), Spacer(1, 4), Paragraph(f"<b>{it['name']}</b>", styles["Normal"]), Paragraph(f"{it['tag']} · {it.get('verification','')}", ParagraphStyle('c', parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#8f8f8f")))]
+                row.append(cell)
+                if len(row) == 3: cells.append(row); row = []
+            except Exception: pass
+        if row: row += [""] * (3 - len(row)); cells.append(row)
+        if cells:
+            grid = Table(cells, colWidths=[60*mm, 60*mm, 60*mm])
+            grid.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"TOP"),("LEFTPADDING",(0,0),(-1,-1),4),("RIGHTPADDING",(0,0),(-1,-1),4),("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6)]))
+            story.append(grid)
+    story.append(Spacer(1, 18))
+    story.append(Paragraph(brand.get("footer") or BRANDING_DEFAULT["footer"], styles["Italic"]))
+    doc.build(story); buf.seek(0)
+    await log_event(user, "audit report downloaded", "audit", audit_id, metadata={"format": "pdf", "photo_count": len(photo_items)})
+    return StreamingResponse(iter([buf.getvalue()]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="assetflow_audit_{audit_id}.pdf"'})
 
 async def seed():
     if await db.assets.count_documents({}): return
