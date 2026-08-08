@@ -407,3 +407,41 @@ input[type="file"]{padding:6px 10px}
   .role-preview-grid{grid-template-columns:1fr}
   .kanban{grid-template-columns:1fr}
 }
+
+/* ===== Resource booking page ===== */
+.booking-layout{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:20px;align-items:start}
+@media (max-width:960px){.booking-layout{grid-template-columns:1fr}}
+.res-select-wrap{position:relative}
+.res-select{width:100%;height:52px;appearance:none;-webkit-appearance:none;background:var(--raised);border:1px solid var(--hairline);border-radius:var(--radius-md);padding:0 44px 0 16px;font:600 15px var(--font-sans);color:var(--ink);cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.res-select:focus{outline:0;border-color:var(--faint);box-shadow:0 0 0 3px var(--link-soft)}
+.res-chevron{position:absolute;right:16px;top:50%;transform:translateY(-50%) rotate(90deg);color:var(--mute);pointer-events:none}
+.res-meta{display:flex;align-items:center;gap:8px;color:var(--mute);font-size:13px;margin-top:14px}
+.res-cat{margin-left:auto;background:var(--hairline-soft);border:1px solid var(--hairline);border-radius:var(--radius-pill);padding:3px 10px;font:600 11px var(--font-mono);color:var(--body);letter-spacing:.04em}
+.agenda-day{display:grid;grid-template-columns:60px 1fr;gap:18px;padding:16px 0;border-top:1px solid var(--hairline)}
+.agenda-day:first-of-type{border-top:0;padding-top:4px}
+.agenda-date .dow{font:600 11px var(--font-mono);color:var(--mute);letter-spacing:.12em}
+.agenda-date .dnum{font:600 24px var(--font-sans);line-height:1.1;letter-spacing:-.5px}
+.agenda-slots{min-width:0}
+.agenda-empty{color:var(--faint);font-style:italic;font-size:13px;padding-top:6px}
+.agenda-chip{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--raised);border:1px solid var(--hairline);border-left:3px solid var(--cyan);border-radius:var(--radius-md);padding:12px 14px;margin-bottom:8px;transition:transform .15s,box-shadow .15s,border-color .15s}
+.agenda-chip:last-child{margin-bottom:0}
+.agenda-chip:hover{transform:translateY(-1px);box-shadow:var(--shadow-2);border-color:var(--faint)}
+.chip-info{min-width:0}
+.chip-info .ct{font:600 14px var(--font-sans);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chip-info .cs{color:var(--mute);font-size:12px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chip-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.pill-up{display:inline-flex;align-items:center;gap:6px;color:var(--cyan);background:color-mix(in srgb,var(--cyan) 14%,transparent);border:1px solid color-mix(in srgb,var(--cyan) 38%,transparent);border-radius:var(--radius-pill);padding:4px 11px;font:600 12px var(--font-sans)}
+.pill-up .dot{width:6px;height:6px;border-radius:50%;background:var(--cyan)}
+.pill-done{display:inline-flex;align-items:center;color:var(--faint);background:var(--hairline-soft);border:1px solid var(--hairline);border-radius:var(--radius-pill);padding:4px 11px;font:600 12px var(--font-sans)}
+.chip-x{background:transparent;border:0;color:var(--faint);cursor:pointer;display:grid;place-items:center;width:32px;height:32px;border-radius:50%;transition:background .15s,color .15s}
+.chip-x:hover{background:var(--hairline);color:var(--error)}
+.new-booking{position:sticky;top:20px}
+.nb-title{font:600 18px var(--font-sans);letter-spacing:-.4px;margin:0 0 18px}
+.nb-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.nb-field{margin-bottom:14px}
+.nb-field label{display:block;font:500 12px var(--font-sans);color:var(--body);margin-bottom:6px}
+.nb-input,.nb-textarea{width:100%;min-height:44px;background:var(--raised);border:1px solid var(--hairline);border-radius:var(--radius-sm);padding:10px 12px;font:400 14px var(--font-sans);color:var(--ink);transition:border-color .15s,box-shadow .15s}
+.nb-input:focus,.nb-textarea:focus{outline:0;border-color:var(--faint);box-shadow:0 0 0 3px var(--link-soft)}
+.nb-textarea{min-height:88px;resize:vertical;line-height:1.5}
+.nb-confirm{width:100%;height:48px;margin-top:6px;font-size:14px}
+@media (max-width:520px){.nb-row{grid-template-columns:1fr}}

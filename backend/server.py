@@ -107,6 +107,14 @@ class BookingCreate(BaseModel):
     start_time: str = Field(min_length=4, max_length=8)
     end_time: str = Field(min_length=4, max_length=8)
     purpose: str = Field(min_length=3, max_length=300)
+    # --- College-context detail fields (optional, non-breaking) ---
+    resource_name: str = Field(default="", max_length=120)
+    location: str = Field(default="", max_length=120)
+    category: str = Field(default="", max_length=60)
+    event_title: str = Field(default="", max_length=120)
+    department: str = Field(default="", max_length=80)
+    attendees: int = Field(default=0, ge=0, le=100000)
+    contact: str = Field(default="", max_length=120)
 
     @field_validator("resource_id", "date", "start_time", "end_time", "purpose")
     @classmethod
@@ -865,10 +873,72 @@ async def ensure_supporting_seed():
     if not await db.nodues.count_documents({}):
         await db.nodues.insert_many([{ "student_id": f"student_seed_{i}", "student_name": name, "roll_number": roll, "overall_status": status, "department_statuses": [{"department": d, "status": "Cleared" if status == "Cleared" else ("Pending" if d == "Library" else "Cleared"), "note": ""} for d in ["Library", "Hostel", "Sports"]] } for i, (name, roll, status) in enumerate([("Ananya Rao", "CSE21A004", "In progress"), ("Vikram Shah", "ME22B018", "Cleared"), ("Sara Thomas", "CE21C011", "In progress")])])
 
+async def ensure_demo_data():
+    """Idempotent rich demo/temporary data so every feature is testable. Uses stable IDs + upserts."""
+    try:
+        # --- Bookable resources (rooms, projector, vehicle, laptop) ---
+        resources = [
+            ("ast_demo_laptop1", "AF-0006", "Dell Latitude Laptop", "IT Equipment", "HQ floor 3", "Computer Science"),
+            ("ast_demo_room1", "AF-2025-2001", "Seminar Hall A", "Room", "Academic Block · Floor 2", "Administration"),
+            ("ast_demo_room2", "AF-2025-2002", "Conference Room B", "Room", "Admin Block · Floor 1", "Administration"),
+            ("ast_demo_proj1", "AF-2025-2003", "Epson Projector EB-X06", "Projector", "AV Store", "Administration"),
+            ("ast_demo_vehicle1", "AF-2025-2004", "College Bus (32-seater)", "Vehicle", "Transport Bay", "Administration"),
+        ]
+        for aid, tag, name, cat, loc, dept in resources:
+            await db.assets.update_one({"asset_id": aid}, {"$set": {"asset_id": aid, "tag": tag, "name": name, "category": cat, "location": loc, "department": dept, "status": "Available", "bookable": True, "serial": f"SN-{aid[-6:].upper()}", "updated_at": now_iso()}, "$setOnInsert": {"created_at": now_iso()}}, upsert=True)
+
+        # --- Demo users with known passwords for role testing ---
+        pwd = bcrypt.hashpw(b"Campus123!", bcrypt.gensalt()).decode()
+        demo_users = [
+            ("user_demo_priya", "Priya Ramesh", "priya@assetflow.edu", "HOD", "Computer Science", "Active"),
+            ("user_demo_arjun", "Arjun Menon", "arjun@assetflow.edu", "Employee", "Mechanical", "Active"),
+            ("user_demo_ananya", "Ananya Rao", "ananya@assetflow.edu", "Student", "Computer Science", "Active"),
+            ("user_demo_vikram", "Vikram Shah", "vikram@assetflow.edu", "Student", "Mechanical", "Pending"),
+        ]
+        for uid, name, email, role, dept, status in demo_users:
+            await db.users.update_one({"email": email}, {"$set": {"user_id": uid, "name": name, "email": email, "role": role, "department": dept, "status": status, "password_hash": pwd, "picture": ""}, "$setOnInsert": {"created_at": now_iso()}}, upsert=True)
+
+        # --- Bookings across the next 7 days (upsert keeps them current & idempotent) ---
+        today = datetime.now(timezone.utc).date()
+        demo_bookings = [
+            ("laptop1", "ast_demo_laptop1", "Dell Latitude Laptop", "HQ floor 3", "IT Equipment", 0, "09:00", "10:00", "Team retrospective", "Sprint retro", "Computer Science", 8, "Priya Ramesh", "user_demo_priya"),
+            ("room1", "ast_demo_room1", "Seminar Hall A", "Academic Block · Floor 2", "Room", 1, "11:00", "13:00", "Guest lecture — AI in Industry", "Guest Lecture", "Computer Science", 120, "Priya Ramesh", "user_demo_priya"),
+            ("room2", "ast_demo_room2", "Conference Room B", "Admin Block · Floor 1", "Room", 3, "15:00", "16:30", "Department review meeting", "Dept Review", "Administration", 15, "Rohan Kapoor", "user_demo_admin"),
+            ("proj1", "ast_demo_proj1", "Epson Projector EB-X06", "AV Store", "Projector", 4, "10:00", "12:00", "NBA documentation shoot", "Accreditation", "Administration", 5, "Maya Iyer", "user_demo_assetflow"),
+            ("bus1", "ast_demo_vehicle1", "College Bus (32-seater)", "Transport Bay", "Vehicle", 6, "07:00", "18:00", "Industrial visit — Foundry", "Industrial Visit", "Mechanical", 32, "Arjun Menon", "user_demo_arjun"),
+        ]
+        for key, rid, rname, loc, cat, offset, st, et, purpose, title, dept, att, by, by_id in demo_bookings:
+            d = (today + timedelta(days=offset)).isoformat()
+            await db.bookings.update_one({"booking_id": f"book_demo_{key}"}, {"$set": {"booking_id": f"book_demo_{key}", "resource_id": rid, "resource_name": rname, "location": loc, "category": cat, "date": d, "start_time": st, "end_time": et, "purpose": purpose, "event_title": title, "department": dept, "attendees": att, "contact": "", "requested_by": by, "requested_by_id": by_id, "status": "Confirmed"}, "$setOnInsert": {"created_at": now_iso()}}, upsert=True)
+
+        # --- Maintenance across all stages ---
+        maints = [
+            ("mnt_demo_open", "ast_demo_proj1", "Projector lamp flickering during lectures", "Medium", "Priya Ramesh", "user_demo_priya", "Open", None),
+            ("mnt_demo_prog", "ast_seed_0", "Oscilloscope probe calibration drift", "High", "Arjun Menon", "user_demo_arjun", "In progress", None),
+            ("mnt_demo_res", "ast_demo_room1", "AC not cooling in Seminar Hall A", "Low", "Maya Iyer", "user_demo_assetflow", "Resolved", (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()),
+        ]
+        for rid, aid, desc, prio, by, by_id, status, resolved in maints:
+            setd = {"request_id": rid, "asset_id": aid, "description": desc, "priority": prio, "raised_by": by, "raised_by_id": by_id, "status": status}
+            if resolved: setd["resolved_at"] = resolved
+            await db.maintenance.update_one({"request_id": rid}, {"$set": setd, "$setOnInsert": {"created_at": now_iso(), "photos": []}}, upsert=True)
+
+        # --- One closed audit with fixed items (so PDF/photo grid is testable) ---
+        if not await db.audits.find_one({"audit_id": "audit_demo_closed"}):
+            cs_assets = [clean(x) for x in await db.assets.find({"department": "Computer Science"}, {"_id": 0}).to_list(50)]
+            items = [{"asset_id": x["asset_id"], "tag": x["tag"], "name": x["name"], "expected_location": x["location"], "verification": "Verified", "note": "", "photos": []} for x in cs_assets]
+            await db.audits.insert_one({"audit_id": "audit_demo_closed", "department": "Computer Science", "period": "July 2026", "auditors": ["Maya Iyer"], "status": "Closed", "created_at": now_iso(), "closed_at": now_iso(), "items": items})
+
+        # --- Extra no-dues records ---
+        for i, (sid, name, roll, status) in enumerate([("student_demo_1", "Neha Gupta", "CSE21A012", "In progress"), ("student_demo_2", "Karan Patel", "ME22B033", "Cleared")]):
+            await db.nodues.update_one({"student_id": sid}, {"$setOnInsert": {"student_id": sid, "student_name": name, "roll_number": roll, "overall_status": status, "department_statuses": [{"department": d, "status": ("Cleared" if status == "Cleared" or d != "Library" else "Pending"), "note": ""} for d in ["Library", "Hostel", "Sports"]]}}, upsert=True)
+    except Exception as e:
+        logger.warning(f"ensure_demo_data skipped: {e}")
+
 @app.on_event("startup")
 async def startup():
     await seed()
     await ensure_supporting_seed()
+    await ensure_demo_data()
 @app.on_event("shutdown")
 async def shutdown(): client.close()
 app.include_router(api)

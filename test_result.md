@@ -164,9 +164,9 @@ backend:
 
 metadata:
   created_by: "main_agent"
-  version: "1.2"
-  test_sequence: 2
-  run_ui: false
+  version: "1.3"
+  test_sequence: 3
+  run_ui: true
 
 test_plan:
   current_focus: []
@@ -177,5 +177,23 @@ test_plan:
 agent_communication:
     -agent: "main"
     -message: "DB switched to user's MongoDB Atlas (assetflow_campus) and backend/frontend deps reinstalled. All four features are already implemented in code. Please verify the four backend tasks above. Admin login: admin@assetflow.edu / Admin123!. Asset Manager: demo@assetflow.edu / Campus123!. Use these; do not guess credentials. Backend base URL is REACT_APP_BACKEND_URL + /api. Auth is a session cookie set on login."
+    -agent: "testing"
+    -message: "✅ RESOURCE BOOKING PAGE TESTING COMPLETE - ALL TESTS PASSED (7/7 verification points). Executed comprehensive Playwright tests on the redesigned /bookings page. All functionality working correctly: two-column layout (desktop) and single-column (mobile), resource dropdown with location display, 7-day agenda with seeded bookings, detailed booking form with all fields, validation (end time + same day), cancel functionality (backend confirms 200 OK), and responsive design (44px tall inputs on mobile). Minor non-blocking issue: React console warning about <span> in <option> tag (HTML validation). Screenshots captured for desktop and mobile views. NO CRITICAL ISSUES FOUND. All features ready for production."
+
+frontend:
+  - task: "Resource booking page redesign + detailed college booking form + 7-day agenda"
+    implemented: true
+    working: true
+    file: "frontend/src/App.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Redesigned /bookings into a two-column layout: LEFT = Resource dropdown (bookable assets, shows tag + name + location + category) and a 'Next 7 days' agenda listing seeded bookings per day (event title, time range, requester, Upcoming/Done pill, cancel X); RIGHT = 'New booking' card with Start/End datetime-local, Event title, Department, Expected attendees, Contact, Purpose textarea, and full-width Confirm booking button. On submit the client derives date/start_time/end_time from the datetime-local values and sends the extended payload. Backend BookingCreate extended with optional fields (resource_name, location, category, event_title, department, attendees, contact). Rich demo data seeded (ensure_demo_data): 5 bookable resources incl AF-0006 Dell Latitude Laptop, bookings across next 7 days, extra users, maintenance across stages, a closed audit, more no-dues. Please verify: (1) selecting a resource shows its location; (2) agenda shows seeded bookings for that resource across the next 7 days and 'Nothing booked' otherwise; (3) creating a NEW booking via the detailed form succeeds and appears in the agenda; (4) cancelling a booking (X) removes it; (5) responsive layout collapses to single column on mobile widths. Use HTTPS preview URL. Credentials in /app/memory/test_credentials.md (admin@assetflow.edu / Admin123!)."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ ALL 7 VERIFICATION POINTS PASSED. Comprehensive Playwright testing completed on /bookings route. (1) LAYOUT: Two-column layout verified - resource card, 7-day agenda, and booking form card all visible and properly structured. (2) RESOURCE + LOCATION: Dropdown lists all 8 bookable resources including AF-0006 Dell Latitude Laptop, Seminar Hall A, Conference Room B, Epson Projector, College Bus. Selecting Dell Latitude shows location 'HQ floor 3' with category 'IT Equipment'. (3) AGENDA DATA: Shows 7 days correctly with seeded 'Sprint retro' booking (09:00 AM — 10:00 AM, Priya Ramesh, 8 attendees, Done status, cancel X button). Days without bookings show 'Nothing booked'. (4) CREATE BOOKING: Successfully created 'Faculty Workshop on Digital Pedagogy' with all detailed fields (Start: tomorrow 14:00, End: 15:00, Department: Computer Science, Attendees: 25, Contact: Dr. Sharma / 9876543210, Purpose: detailed text). Success toast appeared and booking appeared in agenda. (5) VALIDATION: End time <= start time shows error 'End time must be after'. Different days shows 'same day' error. Both validations working correctly. (6) CANCEL: Cancel X button triggers DELETE API (backend logs confirm 200 OK), success toast appears, booking removed from UI. (7) RESPONSIVE: Mobile viewport (390x844) shows single-column stacked layout, inputs are 44px tall (comfortably tappable). Desktop and mobile screenshots captured. Minor: React console warning about <span> in <option> (HTML validation issue, non-blocking). All core functionality working as specified."
     -agent: "testing"
     -message: "✅ BACKEND TESTING COMPLETE - ALL 4 FEATURES WORKING (18/18 tests passed). Created /app/backend_test.py and executed comprehensive tests. (1) Push notifications: public key endpoint, subscribe/unsubscribe, and high-priority maintenance trigger all working. (2) Bulk CSV import: assets and students import with per-row validation (missing fields, invalid email, duplicates) working correctly, admin-only RBAC enforced. (3) Delegation slots: create/list/revoke working, all validations (time range, non-existent deputy, self-delegation) working correctly. (4) Audit PDF: generates valid PDF with application/pdf Content-Type. All features verified end-to-end with correct credentials. NO ISSUES FOUND."

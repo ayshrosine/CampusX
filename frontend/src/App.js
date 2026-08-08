@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BrowserRouter, Routes, Route, NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
-import { Activity, Archive, ArrowLeft, ArrowRight, BarChart3, Bell, Box, Camera, Check, ChevronRight, ClipboardCheck, Clock3, Download, Eye, FileText, GripVertical, Hammer, Image as ImageIcon, LayoutDashboard, LogOut, Menu, MoreHorizontal, Moon, Package, Plus, QrCode, Search, Settings2, Shield, Sun, Trash2, Upload, User, Users, Wrench, X, Zap } from "lucide-react";
+import { Activity, Archive, ArrowLeft, ArrowRight, BarChart3, Bell, Box, Calendar, Camera, Check, ChevronRight, ClipboardCheck, Clock3, Download, Eye, FileText, GripVertical, Hammer, Image as ImageIcon, LayoutDashboard, LogOut, MapPin, Menu, MoreHorizontal, Moon, Package, Plus, QrCode, Search, Settings2, Shield, Sun, Trash2, Upload, User, Users, Wrench, X, Zap } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
 import { Html5Qrcode } from "html5-qrcode";
@@ -866,49 +866,148 @@ function Reports() {
   );
 }
 
+function pad2(n) { return String(n).padStart(2, "0"); }
+function dayISO(offset) {
+  const d = new Date(Date.now() + offset * 86400000);
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+}
+function to12h(t) {
+  if (!t || !t.includes(":")) return t || "";
+  const [h, m] = t.split(":").map(Number);
+  const ap = h >= 12 ? "PM" : "AM";
+  const hh = h % 12 === 0 ? 12 : h % 12;
+  return `${pad2(hh)}:${pad2(m)} ${ap}`;
+}
+function defaultBookingWindow() {
+  const s = new Date(Date.now() + 3600000); s.setMinutes(0, 0, 0);
+  const e = new Date(s.getTime() + 3600000);
+  const fmt = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return { start: fmt(s), end: fmt(e) };
+}
+
 function Bookings() {
+  const [resources, setResources] = useState([]);
+  const [selected, setSelected] = useState("");
   const [items, setItems] = useState([]);
-  const [form, setForm] = useState({ resource_id: "ast_seed_1", date: new Date(Date.now() + 86400000).toISOString().slice(0, 10), start_time: "10:00", end_time: "11:00", purpose: "" });
-  const load = useCallback(() => api("/bookings").then(setItems).catch((e) => toast.error(e.message)), []);
-  useEffect(() => { load(); }, [load]);
+  const win = defaultBookingWindow();
+  const [form, setForm] = useState({ start: win.start, end: win.end, event_title: "", department: "", attendees: "", contact: "", purpose: "" });
+  const [busy, setBusy] = useState(false);
+
+  const loadBookings = useCallback(() => api("/bookings").then(setItems).catch((e) => toast.error(e.message)), []);
+  useEffect(() => {
+    api("/assets").then((a) => {
+      const bookable = a.filter((x) => x.bookable);
+      const list = bookable.length ? bookable : a;
+      setResources(list);
+      if (list.length) setSelected((prev) => prev || list[0].asset_id);
+    }).catch((e) => toast.error(e.message));
+    loadBookings();
+  }, [loadBookings]);
+
+  const resource = resources.find((r) => r.asset_id === selected);
+
   const save = async (e) => {
     e.preventDefault();
+    if (!resource) { toast.error("Pick a resource first"); return; }
+    if (!form.start || !form.end) { toast.error("Choose a start and end time"); return; }
+    const date = form.start.slice(0, 10);
+    if (form.end.slice(0, 10) !== date) { toast.error("Start and end must be on the same day"); return; }
+    const start_time = form.start.slice(11, 16), end_time = form.end.slice(11, 16);
+    if (end_time <= start_time) { toast.error("End time must be after the start time"); return; }
+    if (!form.purpose.trim()) { toast.error("Please add a purpose"); return; }
+    setBusy(true);
     try {
-      await api("/bookings", { method: "POST", body: JSON.stringify(form) });
+      await api("/bookings", { method: "POST", body: JSON.stringify({
+        resource_id: resource.asset_id, resource_name: resource.name, location: resource.location || "", category: resource.category || "",
+        date, start_time, end_time, purpose: form.purpose.trim(),
+        event_title: form.event_title.trim(), department: form.department.trim(), attendees: Number(form.attendees) || 0, contact: form.contact.trim(),
+      }) });
       toast.success("Booking confirmed and logged");
-      load();
-    } catch (e) { toast.error(e.message); }
+      const w = defaultBookingWindow();
+      setForm({ start: w.start, end: w.end, event_title: "", department: "", attendees: "", contact: "", purpose: "" });
+      loadBookings();
+    } catch (err) { toast.error(err.message); } finally { setBusy(false); }
   };
+
   const cancel = async (b) => {
-    try {
-      await api(`/bookings/${b.booking_id}`, { method: "DELETE" });
-      toast.success("Booking cancelled");
-      load();
-    } catch (e) { toast.error(e.message); }
+    try { await api(`/bookings/${b.booking_id}`, { method: "DELETE" }); toast.success("Booking cancelled"); loadBookings(); }
+    catch (e) { toast.error(e.message); }
   };
+
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const iso = dayISO(i);
+    const d = new Date(iso + "T00:00:00Z");
+    return { iso, dow: d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" }).toUpperCase(), dnum: d.getUTCDate() };
+  });
+  const now = new Date();
+  const bookingsFor = (iso) => items.filter((b) => b.resource_id === selected && b.date === iso).sort((a, b) => (a.start_time || "").localeCompare(b.start_time || ""));
+
   return (
     <>
-      <PageHeader eyebrow="RESOURCE CALENDAR" title="Bookings" description="Reserve shared rooms and equipment without double-booking." action={<button data-testid="booking-submit-button" className="primary-btn" onClick={() => document.getElementById("booking-form").requestSubmit()}><Plus size={14} /> Confirm booking</button>} />
-      <section className="surface form-surface">
-        <p className="eyebrow" style={{ marginBottom: 10 }}>NEW SLOT</p>
-        <form id="booking-form" className="inline-form" onSubmit={save}>
-          {[["resource_id", "Resource ID"], ["date", "Date"], ["start_time", "Start"], ["end_time", "End"], ["purpose", "Purpose"]].map(([k, p]) => (
-            <input data-testid={`booking-${k}-input`} key={k} placeholder={p} value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} required />
-          ))}
-        </form>
-      </section>
-      <section className="surface">
-        <div className="section-title"><div><p className="eyebrow">CONFIRMED SLOTS</p><h3>Upcoming bookings</h3></div></div>
-        {items.map((x) => (
-          <div data-testid="booking-row" className="log-row" key={x.booking_id}>
-            <span className="activity-icon"><Clock3 size={13} /></span>
-            <div><b>{x.resource_id}</b><p style={{ margin: "2px 0", fontSize: 12 }}>{x.date} · {x.start_time}–{x.end_time}</p><small>{x.requested_by} · {x.purpose}</small></div>
-            <Status>{x.status}</Status>
-            <button data-testid="booking-cancel-button" className="advance-btn" style={{ width: "auto", padding: "4px 10px", marginTop: 0 }} onClick={() => cancel(x)}><X size={12} /> Cancel</button>
-          </div>
-        ))}
-        {!items.length && <div className="empty">No confirmed bookings yet.</div>}
-      </section>
+      <PageHeader eyebrow="BOOKING" title="Resource booking" description="Reserve rooms, projectors and vehicles by time-slot." />
+      <div className="booking-layout">
+        <div className="booking-main">
+          <section className="surface" data-testid="booking-resource-card">
+            <p className="eyebrow" style={{ marginBottom: 10 }}>Resource</p>
+            <div className="res-select-wrap">
+              <select data-testid="booking-resource-select" className="res-select" value={selected} onChange={(e) => setSelected(e.target.value)}>
+                {resources.length === 0 && <option value="">No bookable resources</option>}
+                {resources.map((r) => <option key={r.asset_id} value={r.asset_id}>{r.tag} · {r.name}</option>)}
+              </select>
+              <ChevronRight size={16} className="res-chevron" />
+            </div>
+            <div className="res-meta"><MapPin size={14} /> <span>{resource?.location || "—"}</span>{resource?.category && <span className="res-cat">{resource.category}</span>}</div>
+          </section>
+
+          <section className="surface" data-testid="booking-agenda" style={{ marginTop: 20 }}>
+            <div className="section-title"><div><p className="eyebrow">Calendar</p><h3>Next 7 days</h3></div></div>
+            {days.map((day) => {
+              const list = bookingsFor(day.iso);
+              return (
+                <div className="agenda-day" key={day.iso}>
+                  <div className="agenda-date"><div className="dow">{day.dow}</div><div className="dnum">{day.dnum}</div></div>
+                  <div className="agenda-slots">
+                    {list.length === 0 && <div className="agenda-empty">Nothing booked</div>}
+                    {list.map((b) => {
+                      const upcoming = new Date(`${b.date}T${b.end_time || "00:00"}:00Z`) >= now;
+                      return (
+                        <div className="agenda-chip" data-testid="booking-row" key={b.booking_id}>
+                          <div className="chip-info">
+                            <div className="ct">{b.event_title || b.purpose}</div>
+                            <div className="cs">{to12h(b.start_time)} — {to12h(b.end_time)} · {b.requested_by}{b.attendees ? ` · ${b.attendees} attendees` : ""}</div>
+                          </div>
+                          <div className="chip-right">
+                            <span className={upcoming ? "pill-up" : "pill-done"}>{upcoming && <span className="dot" />}{upcoming ? "Upcoming" : "Done"}</span>
+                            <button className="chip-x" data-testid="booking-cancel-button" title="Cancel booking" onClick={() => cancel(b)}><X size={15} /></button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </section>
+        </div>
+
+        <aside className="surface new-booking" data-testid="booking-form-card">
+          <h3 className="nb-title">New booking</h3>
+          <form id="booking-form" onSubmit={save}>
+            <div className="nb-row">
+              <div className="nb-field"><label>Start</label><input data-testid="booking-start-input" className="nb-input" type="datetime-local" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} required /></div>
+              <div className="nb-field"><label>End</label><input data-testid="booking-end-input" className="nb-input" type="datetime-local" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} required /></div>
+            </div>
+            <div className="nb-field"><label>Event / purpose title</label><input data-testid="booking-title-input" className="nb-input" placeholder="e.g. Guest lecture — AI in Industry" value={form.event_title} onChange={(e) => setForm({ ...form, event_title: e.target.value })} /></div>
+            <div className="nb-row">
+              <div className="nb-field"><label>Department</label><input data-testid="booking-department-input" className="nb-input" placeholder="e.g. Computer Science" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} /></div>
+              <div className="nb-field"><label>Expected attendees</label><input data-testid="booking-attendees-input" className="nb-input" type="number" min="0" placeholder="0" value={form.attendees} onChange={(e) => setForm({ ...form, attendees: e.target.value })} /></div>
+            </div>
+            <div className="nb-field"><label>Contact (phone / email)</label><input data-testid="booking-contact-input" className="nb-input" placeholder="Who to reach for this booking" value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} /></div>
+            <div className="nb-field"><label>Purpose details</label><textarea data-testid="booking-purpose-input" className="nb-textarea" placeholder="Describe the reason for this reservation…" value={form.purpose} onChange={(e) => setForm({ ...form, purpose: e.target.value })} required /></div>
+            <button data-testid="booking-submit-button" type="submit" className="primary-btn nb-confirm" disabled={busy}>{busy ? "Confirming…" : "Confirm booking"}</button>
+          </form>
+        </aside>
+      </div>
     </>
   );
 }
