@@ -45,6 +45,11 @@ Make sure every single function, every single button, and every single page shou
 - 2026-08-08: Server-side RBAC extended to maintenance mutations; DELETE requires owner or management role.
 - 2026-08-08: API error toasts now surface FastAPI 422 field messages instead of "[object Object]".
 
+- 2026-08-08: Added Cloudinary signed uploads for maintenance & audit photos + admin logo. Owner/manager RBAC on delete.
+- 2026-08-08: Added /digest — Monday admin-only preview page (KPIs + open work orders + pending accounts + upcoming bookings + open audits) with Print and PDF export.
+- 2026-08-08: Editable NAAC/NBA branding (institution name, tagline, accreditation body, footer, accent colour, logo) via /admin, applied to the exported PDF cover page and table header.
+- 2026-08-08: Added PWA meta tags + AssetFlow title so /scan feels native on mobile; QR manual input meets 44px touch target.
+
 ## Prioritized backlog
 - P0: Add admin-only RBAC screens for organization setup, account approvals, and audit-cycle closure.
 - P1: Add resource booking calendar with overlap validation and bundled resources.
