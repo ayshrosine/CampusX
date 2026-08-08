@@ -394,6 +394,121 @@ async def accreditation_report(user=Depends(require_permission("reports"))):
     assets = await db.assets.count_documents({}); events = await db.activity.count_documents({}); audits = await db.audits.count_documents({"status": "Closed"}); maintenance = await db.maintenance.count_documents({})
     return {"title": "AssetFlow Campus Accreditation Evidence", "generated_at": now_iso(), "metrics": {"tracked_assets": assets, "audited_cycles": audits, "maintenance_records": maintenance, "activity_events": events}, "format": "NAAC/NBA-ready"}
 
+@api.get("/reports/accreditation/download")
+async def accreditation_download(format: str = "csv", user=Depends(require_permission("reports"))):
+    from fastapi.responses import StreamingResponse
+    import io, csv
+    assets_total = await db.assets.count_documents({})
+    assets_by_status = {}
+    for s in ["Available", "Allocated", "Under Maintenance", "Lost", "Retired"]:
+        assets_by_status[s] = await db.assets.count_documents({"status": s})
+    audits_total = await db.audits.count_documents({})
+    audits_closed = await db.audits.count_documents({"status": "Closed"})
+    maint_total = await db.maintenance.count_documents({})
+    maint_resolved = await db.maintenance.count_documents({"status": "Resolved"})
+    bookings_total = await db.bookings.count_documents({})
+    events = await db.activity.count_documents({})
+    generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    rows = [
+        ("Metric", "Value"),
+        ("Report title", "AssetFlow Campus Accreditation Evidence"),
+        ("Generated at (UTC)", generated),
+        ("Prepared by", user.get("name", "")),
+        ("Format target", "NAAC / NBA"),
+        ("", ""),
+        ("Total tracked assets", assets_total),
+        *[(f"Assets — {k}", v) for k, v in assets_by_status.items()],
+        ("", ""),
+        ("Audit cycles — total", audits_total),
+        ("Audit cycles — closed", audits_closed),
+        ("Maintenance records — total", maint_total),
+        ("Maintenance records — resolved", maint_resolved),
+        ("Bookings — total", bookings_total),
+        ("Activity events logged", events),
+    ]
+    if format == "csv":
+        buf = io.StringIO(); writer = csv.writer(buf)
+        for row in rows: writer.writerow(row)
+        buf.seek(0)
+        await log_event(user, "accreditation report downloaded", "report", "accreditation", metadata={"format": "csv"})
+        return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv", headers={"Content-Disposition": 'attachment; filename="assetflow_accreditation.csv"'})
+    if format == "pdf":
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        buf = io.BytesIO(); doc = SimpleDocTemplate(buf, pagesize=A4, title="AssetFlow Accreditation")
+        styles = getSampleStyleSheet(); story = []
+        story.append(Paragraph("AssetFlow Campus", styles["Title"]))
+        story.append(Paragraph("Accreditation Evidence Report", styles["Heading2"]))
+        story.append(Paragraph(f"Generated {generated} · Prepared by {user.get('name','')}", styles["Normal"]))
+        story.append(Spacer(1, 18))
+        data = [[str(a), str(b)] for a, b in rows if a or b]
+        table = Table(data, colWidths=[280, 200])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#171717")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#ebebeb")),
+        ]))
+        story.append(table)
+        story.append(Spacer(1, 20))
+        story.append(Paragraph("This report is a machine-generated snapshot for accreditation review (NAAC / NBA). All figures are drawn from AssetFlow Campus activity logs and can be re-verified from the workspace.", styles["Italic"]))
+        doc.build(story); buf.seek(0)
+        await log_event(user, "accreditation report downloaded", "report", "accreditation", metadata={"format": "pdf"})
+        return StreamingResponse(iter([buf.getvalue()]), media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="assetflow_accreditation.pdf"'})
+    raise HTTPException(400, "Unsupported format. Use csv or pdf.")
+
+@api.get("/notifications")
+async def notifications(user=Depends(current_user)):
+    items = []
+    high_maint = await db.maintenance.find({"priority": "High", "status": {"$ne": "Resolved"}}, {"_id": 0}).sort("created_at", -1).to_list(20)
+    for m in high_maint:
+        items.append({"id": f"maint_{m['request_id']}", "kind": "maintenance", "title": f"High-priority repair · {m['asset_id']}", "detail": m["description"], "when": m["created_at"], "link": "/maintenance"})
+    from datetime import date as _date
+    today = datetime.now(timezone.utc).date()
+    upcoming_cutoff = (today + timedelta(days=3)).isoformat()
+    today_iso = today.isoformat()
+    bookings = await db.bookings.find({"date": {"$gte": today_iso, "$lte": upcoming_cutoff}, "status": "Confirmed"}, {"_id": 0}).sort([("date", 1), ("start_time", 1)]).to_list(20)
+    for b in bookings:
+        items.append({"id": f"book_{b['booking_id']}", "kind": "booking", "title": f"Upcoming booking · {b['resource_id']}", "detail": f"{b['date']} {b['start_time']}–{b['end_time']} · {b.get('purpose','')}", "when": b["created_at"], "link": "/bookings"})
+    if user.get("role") == "Admin":
+        pending = await db.users.find({"status": "Pending"}, {"_id": 0}).sort("created_at", -1).to_list(20)
+        for p in pending:
+            items.append({"id": f"role_{p['user_id']}", "kind": "approval", "title": f"Role approval pending · {p.get('name','New user')}", "detail": f"{p.get('email','')} · currently {p.get('role','Student')}", "when": p.get("created_at", now_iso()), "link": "/admin"})
+    open_audits = await db.audits.find({"status": "Open"}, {"_id": 0}).sort("created_at", -1).to_list(10)
+    for a in open_audits:
+        pending_items = sum(1 for i in a.get("items", []) if i.get("verification") == "Pending")
+        if pending_items:
+            items.append({"id": f"audit_{a['audit_id']}", "kind": "audit", "title": f"Audit cycle open · {a['department']}", "detail": f"{pending_items} items pending verification", "when": a["created_at"], "link": "/audits"})
+    items.sort(key=lambda x: x["when"], reverse=True)
+    state = await db.notification_state.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
+    last_seen = state.get("last_seen", "1970-01-01T00:00:00+00:00")
+    unread = sum(1 for x in items if x["when"] > last_seen)
+    return {"items": items[:30], "unread": unread, "last_seen": last_seen}
+
+@api.post("/notifications/mark-all-read")
+async def mark_notifications_read(user=Depends(current_user)):
+    await db.notification_state.update_one({"user_id": user["user_id"]}, {"$set": {"last_seen": now_iso()}}, upsert=True)
+    return {"ok": True}
+
+@api.get("/admin/role-preview/{role}")
+async def role_preview(role: str, user=Depends(require_permission("admin"))):
+    if role not in ROLES: raise HTTPException(400, "Unknown role")
+    perms = sorted(ROLE_PERMISSIONS.get(role, set()))
+    labels = {"admin": "Admin console · organization setup · role approvals", "asset_write": "Register, update, check in/out assets", "maintenance_write": "Raise & advance maintenance work orders", "booking": "Reserve rooms and equipment", "audit": "Run and close audit cycles", "nodues": "Manage student no-dues clearance", "reports": "Reports, analytics & accreditation exports"}
+    nav_paths = {"Admin": ["/dashboard","/inventory","/bookings","/maintenance","/audits","/nodues","/reports","/activity","/admin"], "Asset Manager": ["/dashboard","/inventory","/bookings","/maintenance","/audits","/reports","/activity"], "HOD": ["/dashboard","/inventory","/bookings","/maintenance","/reports","/activity"], "Employee": ["/dashboard","/inventory","/bookings","/maintenance","/reports"], "Student": ["/dashboard","/inventory","/bookings","/maintenance"]}
+    return {"role": role, "permissions": perms, "capabilities": [labels[p] for p in perms if p in labels], "visible_pages": nav_paths.get(role, [])}
+
+@api.get("/assets/by-tag/{tag}")
+async def asset_by_tag(tag: str, user=Depends(current_user)):
+    asset = await db.assets.find_one({"tag": tag}, {"_id": 0})
+    if not asset: raise HTTPException(404, "No asset with this tag")
+    return clean(asset)
+
 async def seed():
     if await db.assets.count_documents({}): return
     samples=[("Oscilloscope TBS1202","Lab Equipment","Electronics Lab","Computer Science","Allocated"),("Epson Projector EB-X06","IT Equipment","Seminar Hall 2","Administration","Available"),("CNC Milling Unit","Workshop Machinery","Mechanical Workshop","Mechanical","Under Maintenance"),("3D Printer Pro","Lab Equipment","Innovation Lab","Computer Science","Available"),("Canon EOS 90D","Media Equipment","Media Room","Administration","Allocated"),("Sports Kit — Cricket","Sports Gear","Sports Complex","Sports","Available")]
