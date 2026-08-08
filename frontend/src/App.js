@@ -15,7 +15,14 @@ const api = async (path, options = {}) => {
     ...options,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || "Something went wrong");
+  if (!res.ok) {
+    const detail = data && data.detail;
+    let msg = "Something went wrong";
+    if (typeof detail === "string") msg = detail;
+    else if (Array.isArray(detail)) msg = detail.map((d) => d.msg || d.message || JSON.stringify(d)).join("; ");
+    else if (detail && typeof detail === "object") msg = detail.msg || JSON.stringify(detail);
+    throw new Error(msg);
+  }
   return data;
 };
 

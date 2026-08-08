@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AssetFlow — Campus Edition wireframes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Architects+Daughter&family=Patrick+Hand&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0b0d;
+    --panel:#111113;
+    --line: rgba(255,255,255,0.38);
+    --line-soft: rgba(255,255,255,0.16);
+    --text:#e9e9ec;
+    --dim:#9a9aa4;
+    --green:#4ade80;
+    --green-bg: rgba(74,222,128,0.10);
+    --red:#f87171;
+    --red-bg: rgba(248,113,113,0.10);
+    --amber:#fbbf24;
+    --amber-bg: rgba(251,191,36,0.10);
+    --blue:#60a5fa;
+    --blue-bg: rgba(96,165,250,0.10);
+    --font: 'Patrick Hand', 'Architects Daughter', 'Comic Sans MS', cursive, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background: var(--bg);
+    color:var(--text);
+    font-family: var(--font);
+    padding: 34px 18px 60px;
+  }
+  .wrap{ max-width: 1000px; margin: 0 auto; }
+  .toplabel{
+    font-size:13px;
+    color:var(--dim);
+    letter-spacing:.03em;
+    margin: 0 0 10px 6px;
+  }
+  .hint{
+    font-size:12px;
+    color: var(--dim);
+    text-align:right;
+    margin: 0 6px 10px 0;
+  }
+  /* ---------- login screen ---------- */
+  #loginwrap{ display:flex; justify-content:center; padding: 40px 0 20px; }
+  .login-card{
+    width: 320px;
+    border: 1.5px solid var(--line);
+    border-radius: 20px;
+    padding: 26px 26px 22px;
+    background: var(--panel);
+  }
+  .login-title{ font-weight:700; font-size:20px; text-align:center; margin-bottom:16px; }
+  .af-logo{
+    width:52px; height:52px; border-radius:50%;
+    border:1.5px solid var(--line);
+    display:flex; align-items:center; justify-content:center;
+    margin: 0 auto 16px; font-weight:700; font-size:15px;
+  }
+  .field-label{ font-size:12px; color:var(--dim); margin: 12px 0 4px; }
+  .field{
+    width:100%; padding:9px 11px; border-radius:8px;
+    border:1px solid var(--line-soft); background:transparent;
+    color:var(--text); font-family:inherit; font-size:14px;
+  }
+  .field::placeholder{ color:#6b6b72; }
+  .forgot{ font-size:12px; color:var(--dim); text-align:right; margin-top:6px; }
+  .hr{ border:none; border-top:1px solid var(--line-soft); margin: 16px 0; }
+  .signup-note{ font-size:12.5px; color:var(--dim); line-height:1.5; margin-bottom:14px; }
+  .btn{
+    font-family:inherit; font-size:14px; cursor:pointer;
+    border-radius:9px; padding:9px 16px; border:1px solid var(--line);
+    background:transparent; color:var(--text);
+  }
+  .btn:hover{ background: rgba(255,255,255,0.05); }
+  .btn-block{ width:100%; text-align:center; margin-bottom:10px; }
+  .btn-primary{ border-color: var(--green); color:var(--green); background: var(--green-bg); font-weight:700; }
+  .btn-disabled{ opacity:.45; cursor:not-allowed; border-style:dashed; }
+  /* ---------- app shell ---------- */
+  #shell{ display:none; }
+  .app-frame{
+    border: 1.5px solid var(--line);
+    border-radius: 24px;
+    overflow:hidden;
+    background: var(--panel);
+  }
+  .app-header{
+    padding: 16px 24px;
+    font-weight:700; font-size:19px;
+    border-bottom:1px solid var(--line-soft);
+  }
+  .app-body{ display:flex; min-height: 560px; }
+  .sidebar{
+    width: 200px; flex-shrink:0;
+    border-right:1px solid var(--line-soft);
+    padding: 16px 10px;
+  }
+  .nav-item{
+    padding:8px 12px; border-radius:8px; font-size:14.5px;
+    color:var(--dim); cursor:pointer; margin-bottom:2px;
+    border:1px solid transparent;
+  }
+  .nav-item:hover{ color:var(--text); }
+  .nav-item.active{
+    border-color: var(--green); color:var(--green); background:var(--green-bg); font-weight:700;
+  }
+  .content{ flex:1; padding: 22px 26px; }
+  h3.scr-title{ font-size:16px; font-weight:700; margin:0 0 14px; }
+  p.scr-sub{ font-size:12.5px; color:var(--dim); margin:-8px 0 16px; }
+  /* generic bits */
+  .grid3{ display:grid; grid-template-columns: repeat(3,1fr); gap:12px; }
+  .kpi{ border:1px solid var(--line-soft); border-radius:14px; padding:13px 15px; }
+  .kpi .l{ font-size:11.5px; color:var(--dim); margin-bottom:6px; }
+  .kpi .v{ font-size:24px; font-weight:700; }
+  .alertbar{
+    border:1px solid var(--red); background:var(--red-bg); color:#fca5a5;
+    border-radius:10px; padding:10px 14px; font-size:13px; margin:14px 0;
+  }
+  .row{ display:flex; gap:10px; flex-wrap:wrap; }
+  .btn-sm{ font-size:13px; padding:7px 13px; }
+  .list-item{ border-top:1px solid var(--line-soft); padding:9px 2px; font-size:13.5px; color:var(--dim); }
+  .list-item:first-child{ border-top:none; }
+  table{ width:100%; border-collapse:collapse; font-size:13.5px; }
+  th{ text-align:left; color:var(--dim); font-weight:400; font-size:12px; padding:6px 10px; border-bottom:1px solid var(--line-soft); }
+  td{ padding:9px 10px; border-bottom:1px solid var(--line-soft); }
+  .pill{ display:inline-block; padding:2px 11px; border-radius:999px; font-size:11.5px; border:1px solid; }
+  .pill-green{ color:var(--green); border-color:var(--green); background:var(--green-bg); }
+  .pill-amber{ color:var(--amber); border-color:var(--amber); background:var(--amber-bg); }
+  .pill-red{ color:var(--red); border-color:var(--red); background:var(--red-bg); }
+  .pill-blue{ color:var(--blue); border-color:var(--blue); background:var(--blue-bg); }
+  .pill-gray{ color:var(--dim); border-color:var(--line-soft); }
+  .toolbar{ display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
+  .search{ flex:1; min-width:180px; }
+  .tabs{ display:flex; gap:8px; margin-bottom:16px; }
+  .tab{ padding:6px 15px; border:1px solid var(--line-soft); border-radius:8px; font-size:13px; color:var(--dim); cursor:pointer; }
+  .tab.active{ background:var(--green); border-color:var(--green); color:#04140b; font-weight:700; }
+  .note{ font-size:12px; color:var(--dim); margin-top:12px; }
+  .banner{ border:1px solid var(--line-soft); border-radius:10px; padding:10px 14px; font-size:13px; margin-bottom:14px; color:var(--dim); }
+  .banner-red{ border-color:var(--red); background:var(--red-bg); color:#fca5a5; }
+  .banner-flag{ border-color:var(--amber); background:var(--amber-bg); color:var(--amber); }
+  /* allocation screen */
+  .form-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:14px 0; }
+  textarea.field{ resize:none; height:64px; font-family:inherit; }
+  /* booking screen */
+  .booking-cols{ display:flex; gap:20px; }
+  .timeline{ position:relative; width:100%; border-top:1px solid var(--line-soft); }
+  .tl-row{ height:46px; border-bottom:1px solid var(--line-soft); display:flex; }
+  .tl-time{ width:52px; font-size:12px; color:var(--dim); padding-top:4px; }
+  .tl-slot{ flex:1; position:relative; cursor:pointer; }
+  .tl-slot:hover{ background: rgba(255,255,255,0.03); }
+  .block{ position:absolute; left:60px; right:2px; border-radius:8px; font-size:12px; padding:5px 8px; }
+  .block-booked{ background: var(--blue-bg); border:1px solid var(--blue); color:#93c5fd; }
+  .block-conflict{ background: var(--red-bg); border:1px dashed var(--red); color:#fca5a5; }
+  .book-confirm{ font-size:12.5px; color:var(--green); margin-top:10px; display:none; }
+  /* kanban */
+  .kanban{ display:flex; gap:8px; }
+  .kcol{ flex:1; min-width:0; }
+  .kcol-h{ font-size:11.5px; color:var(--dim); margin-bottom:8px; text-align:center; border-bottom:1px solid var(--line-soft); padding-bottom:8px; }
+  .kcard{ border:1px solid var(--line-soft); border-radius:10px; padding:9px 10px; font-size:12.5px; margin-bottom:9px; }
+  .kcard.resolved{ border-color:var(--green); color:var(--green); }
+  /* reports */
+  .rep-grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:18px; }
+  .chart-card{ border:1px solid var(--line-soft); border-radius:14px; padding:14px 16px; }
+  .chart-title{ font-size:12.5px; color:var(--dim); margin-bottom:10px; }
+  .bars{ display:flex; align-items:flex-end; gap:10px; height:120px; }
+  .bar{ flex:none; background:var(--blue-bg); border:1px solid var(--blue); border-radius:6px 6px 0 0; position:relative; }
+  .bar-lbl{ font-size:10.5px; color:var(--dim); text-align:center; margin-top:5px; }
+  .rep-list-h{ font-size:13px; font-weight:700; margin:0 0 8px; }
+  /* no dues */
+  .nd-row{ display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--line-soft); padding:11px 2px; font-size:14px; }
+  .nd-row:first-child{ border-top:none; }
+  .nd-sub{ font-size:12px; color:var(--dim); margin-top:2px; }
+  .progress{ height:8px; border-radius:6px; background:var(--line-soft); overflow:hidden; margin:14px 0 18px; }
+  .progress-fill{ height:100%; background:var(--green); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div id="loginwrap">
+    <div class="login-card">
+      <div class="af-logo">AF</div>
+      <div class="login-title">AssetFlow — Campus login</div>
+      <div class="field-label">College email</div>
+      <input class="field" placeholder="name@college.edu">
+      <div class="field-label">Password</div>
+      <input class="field" type="password" placeholder="••••••••••">
+      <div class="forgot">Forgot password</div>
+      <hr class="hr">
+      <div class="signup-note">New here? Signup creates a Student account by default — staff and faculty roles are confirmed by the admin office after.</div>
+      <button class="btn btn-block btn-primary" onclick="go('dashboard')">Log in</button>
+      <button class="btn btn-block" onclick="go('dashboard')">Create account</button>
+    </div>
+  </div>
+
+  <div id="shellwrap">
+    <div class="toplabel" id="toplabel"></div>
+    <div id="shell">
+      <div class="app-frame">
+        <div class="app-header">AssetFlow — Campus Edition</div>
+        <div class="app-body">
+          <nav class="sidebar" id="sidebar"></nav>
+          <main class="content" id="content"></main>
+        </div>
+      </div>
+    </div>
+    <p class="hint">Click any item in the sidebar to explore that screen.</p>
+  </div>
+
+</div>
+
+<script>
+var screenMeta = {
+  dashboard: {num:2, title:'Dashboard / Home'},
+  orgsetup: {num:3, title:'Organization setup (Admin only)'},
+  assets: {num:4, title:'Asset registration & directory'},
+  allocation: {num:5, title:'Asset allocation & transfer'},
+  booking: {num:6, title:'Resource booking'},
+  maintenance: {num:7, title:'Maintenance management'},
+  audit: {num:8, title:'Asset audit'},
+  reports: {num:9, title:'Reports & analytics'},
+  notifications: {num:10, title:'Activity logs & notifications'},
+  nodues: {num:11, title:'No-dues clearance (new)'}
+};
+
+var sidebarItems = [
+  ['dashboard','Dashboard'],
+  ['orgsetup','Organization setup'],
+  ['assets','Assets'],
+  ['allocation','Allocation & Transfer'],
+  ['booking','Resource Booking'],
+  ['maintenance','Maintenance'],
+  ['audit','Audit'],
+  ['reports','Reports'],
+  ['notifications','Notifications'],
+  ['nodues','No-Dues Clearance']
+];
+
+function buildSidebar(active){
+  return sidebarItems.map(function(item){
+    var id = item[0], label = item[1];
+    var cls = 'nav-item' + (id===active ? ' active' : '');
+    return '<div class="'+cls+'" onclick="go(\''+id+'\')">'+label+'</div>';
+  }).join('');
+}
+
+var renderers = {
+
+  dashboard: function(){
+    return ''
+    + '<h3 class="scr-title">Today\'s overview</h3>'
+    + '<div class="grid3">'
+    +   kpi('Labs / Halls available','42')
+    +   kpi('Assets allocated','76')
+    +   kpi('Maintenance today','4')
+    +   kpi('Active bookings','9')
+    +   kpi('Pending transfers','3')
+    +   kpi('Upcoming returns','12')
+    + '</div>'
+    + '<div class="alertbar">3 assets overdue for return — flagged for follow-up</div>'
+    + '<div class="row" style="margin-bottom:18px;">'
+    +   '<button class="btn btn-sm">+ Register asset</button>'
+    +   '<button class="btn btn-sm">Book resource</button>'
+    +   '<button class="btn btn-sm">Raise request</button>'
+    + '</div>'
+    + '<div style="font-size:13px;font-weight:700;margin-bottom:4px;">Recent activity</div>'
+    + listItem('Oscilloscope AF-0114 — allocated to Priya Shah, ECE dept')
+    + listItem('Seminar Hall B2 — booking confirmed, 2:00 to 3:00 PM')
+    + listItem('Projector AF-0062 — maintenance resolved');
+  },
+
+  orgsetup: function(){
+    return ''
+    + '<h3 class="scr-title">Organization setup</h3>'
+    + '<div class="tabs" id="org-tabs">'
+    +   '<div class="tab active" onclick="orgTab(this,\'dept\')">Departments</div>'
+    +   '<div class="tab" onclick="orgTab(this,\'cat\')">Categories</div>'
+    +   '<div class="tab" onclick="orgTab(this,\'staff\')">Staff</div>'
+    +   '<div class="tab" onclick="orgTab(this,\'student\')">Students</div>'
+    +   '<div class="tab" style="margin-left:auto;">+ Add</div>'
+    + '</div>'
+    + '<div id="org-body">' + orgTabHtml('dept') + '</div>'
+    + '<div class="note">Editing a department here also drives the picklists in Assets, Allocation and Booking screens.</div>';
+  },
+
+  assets: function(){
+    return ''
+    + '<h3 class="scr-title">Asset registration & directory</h3>'
+    + '<div class="toolbar">'
+    +   '<input class="field search" placeholder="Search by tag, serial, or QR code…">'
+    +   '<button class="btn btn-sm">+ Register asset</button>'
+    + '</div>'
+    + '<div class="row" style="margin-bottom:14px;">'
+    +   '<button class="btn btn-sm">Category</button>'
+    +   '<button class="btn btn-sm">Status</button>'
+    +   '<button class="btn btn-sm">Department</button>'
+    + '</div>'
+    + '<table><tr><th>Tag</th><th>Name</th><th>Category</th><th>Status</th><th>Location</th></tr>'
+    + assetRow('AF-0012','Digital oscilloscope','Lab equipment','Allocated','pill-blue','ECE Lab 2')
+    + assetRow('AF-0062','Projector','Electronics','Under maintenance','pill-amber','Seminar Hall B2')
+    + assetRow('AF-0201','Lab stool','Furniture','Available','pill-green','Workshop store')
+    + assetRow('AF-0343','College bus','Vehicle','Reserved','pill-blue','Transport bay')
+    + '</table>';
+  },
+
+  allocation: function(){
+    return ''
+    + '<h3 class="scr-title">Asset allocation & transfer</h3>'
+    + '<div class="field-label">Asset</div>'
+    + '<input class="field" value="AF-0114 — Digital oscilloscope" readonly>'
+    + '<div class="banner banner-red" style="margin-top:12px;">Already allocated — direct re-allocation is blocked. Submit a transfer request below.</div>'
+    + '<div style="font-size:13px;font-weight:700;margin:14px 0 4px;">Transfer request</div>'
+    + '<div class="form-grid">'
+    +   '<div><div class="field-label">From</div><input class="field" value="Priya Shah — ECE, final year" readonly></div>'
+    +   '<div><div class="field-label">To</div><input class="field" placeholder="Select student or staff…"></div>'
+    + '</div>'
+    + '<div class="field-label">Reason</div>'
+    + '<textarea class="field" placeholder="Why is this asset being transferred?"></textarea>'
+    + '<button class="btn btn-sm btn-primary" style="margin-top:12px;">Submit request</button>'
+    + '<div style="font-size:13px;font-weight:700;margin:20px 0 4px;">Allocation history</div>'
+    + listItem('Mar 12 — allocated to Priya Shah, ECE dept')
+    + listItem('Jan 04 — returned by Arjun Nair, condition: good');
+  },
+
+  booking: function(){
+    return ''
+    + '<h3 class="scr-title">Resource booking</h3>'
+    + '<div class="field-label">Resource</div>'
+    + '<input class="field" value="Seminar Hall B2 — Tue, 7 Jul" readonly>'
+    + '<div class="timeline" style="margin-top:16px;">'
+    +   tlRow('9:00') + tlRow('10:00') + tlRow('11:00') + tlRow('12:00') + tlRow('1:00')
+    +   '<div class="block block-booked" style="top:2px; height:88px;">Booked — Guest lecture (ECE dept) — 9 to 10</div>'
+    +   '<div class="block block-conflict" style="top:70px; height:70px;">Requested 9:30 to 10:30 — conflict, slot unavailable</div>'
+    + '</div>'
+    + '<button class="btn btn-sm" style="margin-top:16px;" onclick="bookSlot()">Book a slot</button>'
+    + '<div class="book-confirm" id="bookConfirm">✓ 11:00–12:00 booked for Seminar Hall B2 — no conflicts found.</div>';
+  },
+
+  maintenance: function(){
+    return ''
+    + '<h3 class="scr-title">Maintenance management</h3>'
+    + '<div class="kanban">'
+    +   kcol('Pending', ['AF-0062 Projector not turning on'])
+    +   kcol('Approved', ['AF-003 AC unit — ECE Lab 2'])
+    +   kcol('Technician assigned', ['AF-0078 Lathe machine — tech: R. Verma'])
+    +   kcol('In progress', ['AF-897 Printer jam — parts ordered'])
+    +   kcol('Resolved', ['AF-873 Chair repair — resolved 7 Jul'], true)
+    + '</div>'
+    + '<div class="note">Approving a card moves the asset to Under maintenance; resolving returns it to Available.</div>';
+  },
+
+  audit: function(){
+    return ''
+    + '<h3 class="scr-title">Asset audit</h3>'
+    + '<div class="banner">Q3 audit: Mechanical Workshop dept — 1–15 Jul &nbsp;·&nbsp; Auditors: A. Rao, S. Iqbal</div>'
+    + '<table><tr><th>Asset</th><th>Expected location</th><th>Verification</th></tr>'
+    + auditRow('AF-003 Lathe machine','Workshop Bay 2','Verified','pill-green')
+    + auditRow('AF-9921 Drill press','Workshop Bay 3','Missing','pill-red')
+    + auditRow('AF-9838 Welding set','Workshop Bay 1','Damaged','pill-amber')
+    + '</table>'
+    + '<div class="banner banner-flag" style="margin-top:14px;">2 assets flagged — discrepancy report generated automatically</div>'
+    + '<button class="btn btn-sm" style="margin-top:6px;" onclick="closeAudit()">Close audit cycle</button>'
+    + '<div class="book-confirm" id="auditConfirm">✓ Audit cycle closed — discrepancy report sent to the Workshop in-charge and IQAC folder.</div>';
+  },
+
+  reports: function(){
+    return ''
+    + '<h3 class="scr-title">Reports & analytics</h3>'
+    + '<div class="rep-grid">'
+    +   '<div class="chart-card"><div class="chart-title">Utilization by department</div>'
+    +     '<div class="bars">'
+    +       bar('Mech',70) + bar('Civil',40) + bar('CSE',85) + bar('ECE',60) + bar('Wksp',95)
+    +     '</div></div>'
+    +   '<div class="chart-card"><div class="chart-title">Maintenance frequency</div>'
+    +     '<svg viewBox="0 0 220 110" width="100%" height="120">'
+    +     '<polyline points="0,90 40,70 80,78 120,45 160,55 200,20" fill="none" stroke="#f87171" stroke-width="2"/>'
+    +     '<line x1="0" y1="100" x2="220" y2="100" stroke="rgba(255,255,255,0.16)"/>'
+    +     '</svg></div>'
+    + '</div>'
+    + '<div class="rep-grid">'
+    +   '<div><div class="rep-list-h">Most used assets</div>'
+    +     listItem('Seminar Hall B2 — 34 bookings this month')
+    +     listItem('College bus AF-0343 — 21 trips this month')
+    +     listItem('Projector AF-0335 — 18 uses')
+    +   '</div>'
+    +   '<div><div class="rep-list-h">Idle assets</div>'
+    +     listItem('3D printer AF-0410 — unused 60+ days')
+    +     listItem('Camera AF-0014 — unused 45+ days')
+    +   '</div>'
+    + '</div>'
+    + '<div class="rep-list-h">Assets due for maintenance / nearing retirement</div>'
+    + listItem('Lathe machine AF-0087 — service due in 5 days')
+    + listItem('Laptop AF-0020 — 4 years old, nearing retirement')
+    + '<div class="row" style="margin-top:16px;">'
+    +   '<button class="btn btn-sm">Export report</button>'
+    +   '<button class="btn btn-sm btn-primary">Export NAAC / NBA report</button>'
+    + '</div>';
+  },
+
+  notifications: function(){
+    return ''
+    + '<h3 class="scr-title">Activity logs & notifications</h3>'
+    + '<div class="tabs" id="notif-tabs">'
+    +   '<div class="tab active" onclick="notifTab(this,\'all\')">All</div>'
+    +   '<div class="tab" onclick="notifTab(this,\'alert\')">Alerts</div>'
+    +   '<div class="tab" onclick="notifTab(this,\'approval\')">Approvals</div>'
+    +   '<div class="tab" onclick="notifTab(this,\'booking\')">Bookings</div>'
+    + '</div>'
+    + '<div id="notif-body">'
+    + notifRow('approval','Oscilloscope AF-0114 assigned to Priya Shah','2m ago')
+    + notifRow('approval','Maintenance request AF-0055 approved','18m ago')
+    + notifRow('booking','Booking confirmed: Seminar Hall B2, 2:00 to 3:00 PM','1h ago')
+    + notifRow('approval','Transfer approved: AF-0033 to Workshop dept','3h ago')
+    + notifRow('alert','Overdue return: AF-0021 was due 3 days ago','1d ago')
+    + notifRow('alert','Audit discrepancy flagged: AF-0088 damaged','2d ago')
+    + '</div>';
+  },
+
+  nodues: function(){
+    return ''
+    + '<h3 class="scr-title">No-dues clearance</h3>'
+    + '<p class="scr-sub">Priya Shah — ECE, final year</p>'
+    + '<div class="progress"><div class="progress-fill" style="width:80%;"></div></div>'
+    + ndRow('Library','Cleared','pill-green','')
+    + ndRow('Hostel','Pending','pill-amber','Study chair AF-0410 not returned')
+    + ndRow('Sports','Cleared','pill-green','')
+    + ndRow('ECE department','Cleared','pill-green','')
+    + ndRow('Workshop','Cleared','pill-green','')
+    + '<button class="btn btn-sm btn-disabled" style="margin-top:16px;">Export clearance certificate</button>'
+    + '<div class="note">Enabled automatically once every department shows Cleared.</div>';
+  }
+};
+
+function kpi(label,val){
+  return '<div class="kpi"><div class="l">'+label+'</div><div class="v">'+val+'</div></div>';
+}
+function listItem(text){ return '<div class="list-item">'+text+'</div>'; }
+function assetRow(tag,name,cat,status,pillClass,loc){
+  return '<tr><td>'+tag+'</td><td>'+name+'</td><td>'+cat+'</td><td><span class="pill '+pillClass+'">'+status+'</span></td><td>'+loc+'</td></tr>';
+}
+function auditRow(asset,loc,status,pillClass){
+  return '<tr><td>'+asset+'</td><td>'+loc+'</td><td><span class="pill '+pillClass+'">'+status+'</span></td></tr>';
+}
+function tlRow(time){
+  return '<div class="tl-row"><div class="tl-time">'+time+'</div><div class="tl-slot"></div></div>';
+}
+function kcol(title,cards,resolved){
+  var html = '<div class="kcol"><div class="kcol-h">'+title+'</div>';
+  cards.forEach(function(c){
+    html += '<div class="kcard'+(resolved?' resolved':'')+'">'+c+'</div>';
+  });
+  return html + '</div>';
+}
+function bar(label,pct){
+  return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;">'
+    + '<div class="bar" style="height:'+pct+'px; width:100%;"></div>'
+    + '<div class="bar-lbl">'+label+'</div></div>';
+}
+function notifRow(cat,text,time){
+  return '<div class="list-item notif-item" data-cat="'+cat+'" style="display:flex;justify-content:space-between;">'
+    + '<span>'+text+'</span><span style="color:#6b6b72;">'+time+'</span></div>';
+}
+function ndRow(dept,status,pillClass,sub){
+  return '<div class="nd-row"><div>'+dept+(sub?'<div class="nd-sub">'+sub+'</div>':'')+'</div><span class="pill '+pillClass+'">'+status+'</span></div>';
+}
+
+var orgData = {
+  dept: {
+    head:['Department','Head','Parent dept','Status'],
+    rows:[
+      ['Mechanical','Dr. Aditi Rao','—','pill-green|Active'],
+      ['Electronics & Comm.','Prof. Rohan Mehta','—','pill-green|Active'],
+      ['Workshop (Central)','Sana Iqbal','Mechanical','pill-green|Active'],
+      ['Civil (old block)','Dr. Vikram Joshi','—','pill-gray|Inactive']
+    ]
+  },
+  cat: {
+    head:['Category','Example items','Notes'],
+    rows:[
+      ['Lab equipment','Oscilloscope, CNC, 3D printer','Warranty period tracked'],
+      ['Electronics','Projector, PA system','AMC tracked'],
+      ['Furniture','Lab stool, hostel cot','—'],
+      ['Vehicles','College bus, staff car','Insurance / PUC tracked']
+    ]
+  },
+  staff: {
+    head:['Name','Email','Department','Role','Status'],
+    rows:[
+      ['Dr. Aditi Rao','aditi.rao@college.edu','Mechanical','HOD','pill-green|Active'],
+      ['Rohan Mehta','rohan.mehta@college.edu','ECE','Faculty','pill-green|Active'],
+      ['Sana Iqbal','sana.iqbal@college.edu','Workshop','Asset manager','pill-green|Active']
+    ]
+  },
+  student: {
+    head:['Name','Email','Department','Year','Status'],
+    rows:[
+      ['Priya Shah','priya.shah@college.edu','ECE','Final year','pill-green|Active'],
+      ['Arjun Nair','arjun.nair@college.edu','Mechanical','2nd year','pill-green|Active']
+    ]
+  }
+};
+
+function orgTabHtml(key){
+  var d = orgData[key];
+  var html = '<table><tr>' + d.head.map(function(h){return '<th>'+h+'</th>';}).join('') + '</tr>';
+  d.rows.forEach(function(r){
+    html += '<tr>' + r.map(function(cell){
+      if (cell.indexOf('|')>-1){
+        var parts = cell.split('|');
+        return '<td><span class="pill '+parts[0]+'">'+parts[1]+'</span></td>';
+      }
+      return '<td>'+cell+'</td>';
+    }).join('') + '</tr>';
+  });
+  return html + '</table>';
+}
+function orgTab(el,key){
+  document.querySelectorAll('#org-tabs .tab').forEach(function(t){ t.classList.remove('active'); });
+  el.classList.add('active');
+  document.getElementById('org-body').innerHTML = orgTabHtml(key);
+}
+
+function notifTab(el,cat){
+  document.querySelectorAll('#notif-tabs .tab').forEach(function(t){ t.classList.remove('active'); });
+  el.classList.add('active');
+  document.querySelectorAll('.notif-item').forEach(function(item){
+    item.style.display = (cat==='all' || item.dataset.cat===cat) ? 'flex' : 'none';
+  });
+}
+
+function bookSlot(){
+  document.getElementById('bookConfirm').style.display = 'block';
+}
+function closeAudit(){
+  document.getElementById('auditConfirm').style.display = 'block';
+}
+
+function go(id){
+  document.getElementById('loginwrap').style.display = 'none';
+  document.getElementById('shell').style.display = 'block';
+  document.getElementById('sidebar').innerHTML = buildSidebar(id);
+  document.getElementById('content').innerHTML = renderers[id]();
+  var m = screenMeta[id];
+  document.getElementById('toplabel').textContent = 'Screen ' + m.num + '   ' + m.title;
+}
+</script>
+</body>
+</html>
