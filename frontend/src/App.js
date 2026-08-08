@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BrowserRouter, Routes, Route, NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
-import { Activity, Archive, ArrowLeft, ArrowRight, BarChart3, Bell, Box, Camera, Check, ChevronRight, ClipboardCheck, Clock3, Download, Eye, FileText, Hammer, LayoutDashboard, LogOut, Menu, Moon, Package, Plus, QrCode, Search, Settings2, Shield, Sun, User, Users, Wrench, X, Zap } from "lucide-react";
+import { Activity, Archive, ArrowLeft, ArrowRight, BarChart3, Bell, Box, Camera, Check, ChevronRight, ClipboardCheck, Clock3, Download, Eye, FileText, GripVertical, Hammer, LayoutDashboard, LogOut, Menu, MoreHorizontal, Moon, Package, Plus, QrCode, Search, Settings2, Shield, Sun, Trash2, User, Users, Wrench, X, Zap } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
 import { Html5Qrcode } from "html5-qrcode";
+import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import "@/App.css";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -527,6 +528,40 @@ function AssetDetail() {
   );
 }
 
+function MaintenanceCard({ x, stage, onAdvance, onSetStatus, onDelete, isDragging, dragProps }) {
+  const [openMenu, setOpenMenu] = useState(false);
+  const stages = ["Pending", "Approved", "In progress", "Resolved"];
+  const idx = stages.indexOf(stage);
+  return (
+    <div data-testid="maintenance-request-card" className={`work-card ${isDragging ? "dragging" : ""}`} {...(dragProps || {})}>
+      <div className="work-card-top">
+        <Status>{x.priority}</Status>
+        <span className="mono" style={{ color: "var(--mute)" }}>{x.request_id}</span>
+      </div>
+      <h3>{x.description}</h3>
+      <p className="muted" style={{ fontSize: 12 }}>{x.asset_id} · {x.raised_by}</p>
+      <small className="mono" style={{ color: "var(--mute)", fontSize: 10 }}>{fmt(x.created_at)}</small>
+      <div style={{ display: "flex", gap: 6, marginTop: 12, position: "relative" }}>
+        {stage !== "Resolved" && stage !== "Rejected" && idx < 3 && (
+          <button data-testid="maintenance-advance-button" className="advance-btn" style={{ flex: 1, marginTop: 0 }} onClick={() => onAdvance(x, stages[idx + 1])}>Advance <ChevronRight size={12} /></button>
+        )}
+        <button data-testid="maintenance-menu-button" className="advance-btn" style={{ width: 32, marginTop: 0, padding: 0 }} onClick={(e) => { e.stopPropagation(); setOpenMenu((v) => !v); }} aria-label="More actions"><MoreHorizontal size={14} /></button>
+        {openMenu && (
+          <>
+            <div style={{ position: "fixed", inset: 0, zIndex: 8 }} onClick={() => setOpenMenu(false)} />
+            <div className="menu-popover" data-testid="maintenance-menu-popover">
+              {stage !== "Resolved" && idx < 3 && <button data-testid="menu-move-next" onClick={() => { setOpenMenu(false); onAdvance(x, stages[idx + 1]); }}><ArrowRight size={13} /> Move to next stage</button>}
+              {stage !== "Resolved" && <button data-testid="menu-move-resolved" onClick={() => { setOpenMenu(false); onSetStatus(x, "Resolved"); }}><Check size={13} /> Mark resolved</button>}
+              {stage !== "Rejected" && <button data-testid="menu-reject" onClick={() => { setOpenMenu(false); onSetStatus(x, "Rejected"); }}><X size={13} /> Reject</button>}
+              <button data-testid="menu-delete" className="danger" onClick={() => { setOpenMenu(false); onDelete(x); }}><Trash2 size={13} /> Delete</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Maintenance() {
   const [items, setItems] = useState([]);
   const [show, setShow] = useState(false);
@@ -537,38 +572,82 @@ function Maintenance() {
     e.preventDefault();
     try {
       await api("/maintenance", { method: "POST", body: JSON.stringify(form) });
-      toast.success("Request raised and logged");
-      setShow(false); load();
+      toast.success("Request raised and logged"); setShow(false); load();
     } catch (err) { toast.error(err.message); }
   };
-  const change = async (x, status) => {
+  const setStatus = async (x, status) => {
+    if (x.status === status) return;
     try {
       await api(`/maintenance/${x.request_id}`, { method: "PATCH", body: JSON.stringify({ status }) });
-      toast.success("Status updated"); load();
+      toast.success(`Moved to ${status}`); load();
+    } catch (e) { toast.error(e.message); }
+  };
+  const remove = async (x) => {
+    if (!window.confirm(`Delete request "${x.description}"?`)) return;
+    try {
+      await api(`/maintenance/${x.request_id}`, { method: "DELETE" });
+      toast.success("Request removed"); load();
     } catch (e) { toast.error(e.message); }
   };
   const stages = ["Pending", "Approved", "In progress", "Resolved"];
+  const onDragEnd = (result) => {
+    if (!result.destination) return;
+    const item = items.find((i) => i.request_id === result.draggableId);
+    if (!item) return;
+    const target = result.destination.droppableId;
+    if (item.status === target) return;
+    setStatus(item, target);
+  };
   return (
     <>
-      <PageHeader eyebrow="WORK ORDER QUEUE" title="Maintenance" description="Move repairs from reported to resolved, with a clear audit trail." action={<button data-testid="maintenance-new-request-button" className="primary-btn" onClick={() => setShow(true)}><Plus size={14} /> Raise request</button>} />
-      <div className="kanban">
-        {stages.map((stage) => (
-          <section className="kanban-column" key={stage}>
-            <div className="kanban-title"><span><i className={`stage-dot ${stage.toLowerCase().replaceAll(" ", "-")}`} />{stage}</span><b>{items.filter((x) => x.status === stage).length}</b></div>
-            {items.filter((x) => x.status === stage).map((x) => (
-              <div data-testid="maintenance-request-card" className="work-card" key={x.request_id}>
-                <div className="work-card-top"><Status>{x.priority}</Status><span className="mono">{x.request_id}</span></div>
-                <h3>{x.description}</h3>
-                <p className="muted" style={{ fontSize: 12 }}>{x.asset_id} · {x.raised_by}</p>
-                <small className="mono" style={{ color: "var(--mute)", fontSize: 10 }}>{fmt(x.created_at)}</small>
-                {stage !== "Resolved" && (
-                  <button data-testid="maintenance-advance-button" className="advance-btn" onClick={() => change(x, stages[Math.min(3, stages.indexOf(stage) + 1)])}>Advance <ChevronRight size={12} /></button>
-                )}
-              </div>
-            ))}
-          </section>
-        ))}
-      </div>
+      <PageHeader eyebrow="WORK ORDER QUEUE" title="Maintenance" description="Drag cards between columns, use the menu for more actions. Resolved items auto-delete after 30 days." action={<button data-testid="maintenance-new-request-button" className="primary-btn" onClick={() => setShow(true)}><Plus size={14} /> Raise request</button>} />
+      <DragDropContext onDragEnd={onDragEnd}>
+        <div className="kanban">
+          {stages.map((stage) => (
+            <Droppable droppableId={stage} key={stage}>
+              {(dropProvided, dropSnapshot) => (
+                <section className={`kanban-column ${dropSnapshot.isDraggingOver ? "over" : ""}`} ref={dropProvided.innerRef} {...dropProvided.droppableProps} data-testid={`kanban-column-${stage.toLowerCase().replaceAll(" ", "-")}`}>
+                  <div className="kanban-title">
+                    <span><i className={`stage-dot ${stage.toLowerCase().replaceAll(" ", "-")}`} />{stage}</span>
+                    <b>{items.filter((x) => x.status === stage).length}</b>
+                  </div>
+                  {items.filter((x) => x.status === stage).map((x, idx) => (
+                    <Draggable key={x.request_id} draggableId={x.request_id} index={idx}>
+                      {(dragProvided, dragSnapshot) => (
+                        <div ref={dragProvided.innerRef} {...dragProvided.draggableProps}>
+                          <MaintenanceCard
+                            x={x}
+                            stage={stage}
+                            onAdvance={setStatus}
+                            onSetStatus={setStatus}
+                            onDelete={remove}
+                            isDragging={dragSnapshot.isDragging}
+                            dragProps={{ ...dragProvided.dragHandleProps }}
+                          />
+                        </div>
+                      )}
+                    </Draggable>
+                  ))}
+                  {dropProvided.placeholder}
+                </section>
+              )}
+            </Droppable>
+          ))}
+        </div>
+      </DragDropContext>
+      {items.some((x) => x.status === "Rejected") && (
+        <section className="surface" style={{ marginTop: 16 }}>
+          <div className="section-title"><div><p className="eyebrow">REJECTED</p><h3>Closed without action</h3></div></div>
+          {items.filter((x) => x.status === "Rejected").map((x) => (
+            <div className="log-row" key={x.request_id}>
+              <span className="activity-icon"><X size={13} /></span>
+              <div><b>{x.description}</b><small>{x.asset_id} · {x.raised_by} · {fmt(x.rejected_at || x.created_at)}</small></div>
+              <button className="advance-btn" style={{ width: "auto", marginTop: 0, padding: "4px 10px" }} onClick={() => setStatus(x, "Pending")}>Reopen</button>
+              <button className="advance-btn" style={{ width: "auto", marginTop: 0, padding: "4px 10px" }} onClick={() => remove(x)}><Trash2 size={12} /></button>
+            </div>
+          ))}
+        </section>
+      )}
       {show && (
         <div className="modal-backdrop" onClick={() => setShow(false)}>
           <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={save}>
@@ -591,14 +670,20 @@ function ActivityPage() {
   const [filter, setFilter] = useState("All");
   const [error, setError] = useState("");
   useEffect(() => { api("/activity").then(setItems).catch((e) => setError(e.message)); }, []);
-  const visible = filter === "All" ? items : items.filter((x) => x.entity_type === filter);
+  const kindOf = (x) => {
+    if (["maintenance", "audit"].includes(x.entity_type)) return "Alerts";
+    if (["user", "department", "category", "report"].includes(x.entity_type)) return "Approvals";
+    if (x.entity_type === "booking") return "Bookings";
+    return "Other";
+  };
+  const visible = filter === "All" ? items : items.filter((x) => kindOf(x) === filter);
+  const tabs = ["All", "Alerts", "Approvals", "Bookings"];
   return (
     <>
       <PageHeader eyebrow="SYSTEM OF RECORD" title="Activity logs" description="A persistent, reviewable history of every successful workspace action." />
       <div className="tabs">
-        <button data-testid="activity-filter-all" className={filter === "All" ? "selected" : ""} onClick={() => setFilter("All")}>All</button>
-        {["asset", "maintenance", "user", "booking", "audit", "nodues", "department", "category", "report"].map((x) => (
-          <button data-testid={`activity-filter-${x}`} className={filter === x ? "selected" : ""} onClick={() => setFilter(x)} key={x}>{x[0].toUpperCase() + x.slice(1)}</button>
+        {tabs.map((t) => (
+          <button data-testid={`activity-filter-${t.toLowerCase()}`} className={filter === t ? "selected" : ""} onClick={() => setFilter(t)} key={t}>{t}</button>
         ))}
       </div>
       {error ? <div data-testid="activity-log-error" className="empty">Unable to load activity logs. {error}</div> : (
@@ -795,6 +880,7 @@ function Admin() {
   const [categories, setCategories] = useState([]);
   const [dept, setDept] = useState("");
   const [category, setCategory] = useState("");
+  const [tab, setTab] = useState("dept");
   const [busy, setBusy] = useState(false);
   const load = useCallback(() => Promise.all([api("/admin/users"), api("/admin/departments"), api("/admin/categories")])
     .then(([u, d, c]) => { setUsers(u); setDepartments(d); setCategories(c); })
@@ -826,6 +912,8 @@ function Admin() {
       toast.success(`Downloaded ${format.toUpperCase()}`);
     } catch (e) { toast.error(e.message); } finally { setBusy(false); }
   };
+  const staff = users.filter((u) => ["Employee", "HOD", "Asset Manager", "Admin"].includes(u.role));
+  const students = users.filter((u) => u.role === "Student");
   return (
     <>
       <PageHeader eyebrow="ADMINISTRATION" title="Admin console" description="Manage campus structure, accounts, and accreditation evidence." action={
@@ -834,26 +922,62 @@ function Admin() {
           <button data-testid="accreditation-export-pdf" className="primary-btn compact" disabled={busy} onClick={() => download("pdf")}><FileText size={13} /> Export PDF</button>
         </div>
       } />
-      <div className="admin-grid">
-        <section className="surface">
-          <div className="section-title"><div><p className="eyebrow">ORGANIZATION SETUP</p><h3>Departments</h3></div></div>
-          <div className="inline-form" style={{ marginBottom: 14 }}>
-            <input data-testid="admin-department-input" placeholder="New department" value={dept} onChange={(e) => setDept(e.target.value)} />
-            <button data-testid="admin-add-department-button" className="primary-btn compact" onClick={() => add("/admin/departments", { name: dept }, setDept)}><Plus size={13} /> Add</button>
+      <section className="surface" style={{ marginBottom: 16 }}>
+        <div className="section-title"><div><p className="eyebrow">ORGANIZATION SETUP</p><h3>Configure your campus</h3></div></div>
+        <div className="tabs" style={{ marginBottom: 18 }}>
+          {[["dept", "Departments"], ["cat", "Categories"], ["staff", "Staff"], ["student", "Students"]].map(([k, label]) => (
+            <button data-testid={`admin-tab-${k}`} key={k} className={tab === k ? "selected" : ""} onClick={() => setTab(k)}>{label}</button>
+          ))}
+        </div>
+        {tab === "dept" && (
+          <>
+            <div className="inline-form" style={{ marginBottom: 14 }}>
+              <input data-testid="admin-department-input" placeholder="New department" value={dept} onChange={(e) => setDept(e.target.value)} />
+              <button data-testid="admin-add-department-button" className="primary-btn compact" onClick={() => add("/admin/departments", { name: dept }, setDept)}><Plus size={13} /> Add</button>
+            </div>
+            {departments.map((x) => <div className="simple-row" key={x.department_id}><b>{x.name}</b><small>{x.type} · {x.status}</small></div>)}
+          </>
+        )}
+        {tab === "cat" && (
+          <>
+            <div className="inline-form" style={{ marginBottom: 14 }}>
+              <input data-testid="admin-category-input" placeholder="New category" value={category} onChange={(e) => setCategory(e.target.value)} />
+              <button data-testid="admin-add-category-button" className="primary-btn compact" onClick={() => add("/admin/categories", { name: category }, setCategory)}><Plus size={13} /> Add</button>
+            </div>
+            {categories.map((x) => <div className="simple-row" key={x.category_id}><b>{x.name}</b><small>{x.example_items}</small></div>)}
+          </>
+        )}
+        {tab === "staff" && (
+          <div>
+            {staff.length === 0 && <div className="empty">No staff accounts yet.</div>}
+            {staff.map((u) => (
+              <div data-testid="admin-staff-row" className="report-row" key={u.user_id}>
+                <div><b>{u.name}</b><small>{u.email} · {u.department}</small></div>
+                <select data-testid="admin-role-select" value={u.role} onChange={(e) => role(u, e.target.value)}>
+                  <option>Student</option><option>Employee</option><option>HOD</option><option>Asset Manager</option><option>Admin</option>
+                </select>
+                <Status>{u.status}</Status>
+              </div>
+            ))}
           </div>
-          {departments.map((x) => <div className="simple-row" key={x.department_id}><b>{x.name}</b><small>{x.type} · {x.status}</small></div>)}
-        </section>
-        <section className="surface">
-          <div className="section-title"><div><p className="eyebrow">MASTER DATA</p><h3>Categories</h3></div></div>
-          <div className="inline-form" style={{ marginBottom: 14 }}>
-            <input data-testid="admin-category-input" placeholder="New category" value={category} onChange={(e) => setCategory(e.target.value)} />
-            <button data-testid="admin-add-category-button" className="primary-btn compact" onClick={() => add("/admin/categories", { name: category }, setCategory)}><Plus size={13} /> Add</button>
+        )}
+        {tab === "student" && (
+          <div>
+            {students.length === 0 && <div className="empty">No student accounts yet.</div>}
+            {students.map((u) => (
+              <div data-testid="admin-student-row" className="report-row" key={u.user_id}>
+                <div><b>{u.name}</b><small>{u.email} · {u.department}</small></div>
+                <select data-testid="admin-role-select" value={u.role} onChange={(e) => role(u, e.target.value)}>
+                  <option>Student</option><option>Employee</option><option>HOD</option><option>Asset Manager</option><option>Admin</option>
+                </select>
+                <Status>{u.status}</Status>
+              </div>
+            ))}
           </div>
-          {categories.map((x) => <div className="simple-row" key={x.category_id}><b>{x.name}</b><small>{x.example_items}</small></div>)}
-        </section>
-      </div>
+        )}
+      </section>
       <section className="surface">
-        <div className="section-title"><div><p className="eyebrow">ROLE APPROVAL QUEUE</p><h3>Accounts & permissions</h3></div></div>
+        <div className="section-title"><div><p className="eyebrow">ROLE APPROVAL QUEUE</p><h3>Pending & recently changed</h3></div></div>
         {users.filter((x) => x.email !== "admin@assetflow.edu").map((u) => (
           <div data-testid="admin-user-row" className="report-row" key={u.user_id}>
             <div><b>{u.name}</b><small>{u.email} · {u.department}</small></div>

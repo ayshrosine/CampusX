@@ -314,6 +314,32 @@ a{color:inherit;text-decoration:none}
 .mobile-menu{display:none}
 .scrim{display:none}
 
+/* ----- Menu popover ------------------------------------------ */
+.menu-popover{position:absolute;right:0;top:36px;min-width:200px;background:var(--elev);border:1px solid var(--hairline);border-radius:var(--radius-sm);box-shadow:var(--shadow-lift);z-index:10;padding:4px;display:grid;gap:2px}
+.menu-popover button{width:100%;text-align:left;padding:8px 10px;border-radius:4px;font:500 12px var(--font-sans);color:var(--ink);display:flex;align-items:center;gap:8px;transition:background-color .12s;background:none;border:0}
+.menu-popover button:hover{background:var(--hairline-soft)}
+.menu-popover button.danger{color:var(--error)}
+.menu-popover button.danger:hover{background:rgba(238,0,0,.08)}
+
+/* ----- Drag & drop ------------------------------------------- */
+.work-card{cursor:grab}
+.work-card:active{cursor:grabbing}
+.work-card.dragging{box-shadow:var(--shadow-lift);border-color:var(--ink);transform:rotate(-1deg)}
+.kanban-column.over{background:var(--hairline);border-color:var(--ink)}
+
+/* ----- Mobile: safer touch targets --------------------------- */
+@media(max-width:700px){
+  .primary-btn,.secondary-btn{min-height:44px;padding:0 16px}
+  .icon-btn{min-width:40px;min-height:40px;width:40px;height:40px}
+  .qr-viewport{aspect-ratio:auto;height:60vw;max-height:340px}
+  .tabs{overflow-x:auto;flex-wrap:nowrap;width:100%;justify-content:flex-start}
+  .tabs button{white-space:nowrap;flex-shrink:0}
+  .top-actions{gap:6px}
+  .search-trigger{display:none}
+  .kanban-column{min-height:auto}
+}
+
+
 /* ----- Responsive -------------------------------------------- */
 @media(max-width:1000px){
   .metric-grid{grid-template-columns:repeat(2,1fr)}

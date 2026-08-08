@@ -276,17 +276,36 @@ async def checkin(asset_id: str, user=Depends(current_user)):
     changes={"status":"Available","holder":None,"expected_return_at":None,"updated_at":now_iso()}; await db.assets.update_one({"asset_id":asset_id},{"$set":changes}); after={**before,**changes}; await log_event(user,"asset checked in","asset",asset_id,before=before,after=after); return clean(after)
 
 @api.get("/maintenance")
-async def maintenance(user=Depends(current_user)): return [clean(x) for x in await db.maintenance.find({}, {"_id":0}).sort("created_at",-1).to_list(100)]
+async def maintenance(user=Depends(current_user)):
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    purged = await db.maintenance.delete_many({"status": "Resolved", "resolved_at": {"$lt": cutoff}})
+    if purged.deleted_count:
+        await db.activity.insert_one({"event_id": f"evt_{uuid.uuid4().hex[:12]}","actor_id":"system","actor":"AssetFlow System","action":f"auto-expired {purged.deleted_count} resolved requests (30d)","entity_type":"maintenance","entity_id":"batch","before":None,"after":None,"metadata":{"purged":purged.deleted_count},"timestamp": now_iso()})
+    return [clean(x) for x in await db.maintenance.find({}, {"_id":0}).sort("created_at",-1).to_list(200)]
 
 @api.post("/maintenance")
-async def create_maintenance(payload: MaintenanceCreate, user=Depends(current_user)):
-    item={**payload.model_dump(),"request_id":f"mnt_{uuid.uuid4().hex[:10]}","raised_by":user["name"],"status":"Pending","created_at":now_iso()}; await db.maintenance.insert_one(item); await log_event(user,"maintenance request raised","maintenance",item["request_id"],after=item); return clean(item)
+async def create_maintenance(payload: MaintenanceCreate, user=Depends(require_permission("maintenance_write"))):
+    item={**payload.model_dump(),"request_id":f"mnt_{uuid.uuid4().hex[:10]}","raised_by":user["name"],"raised_by_id":user["user_id"],"status":"Pending","created_at":now_iso()}; await db.maintenance.insert_one(item); await log_event(user,"maintenance request raised","maintenance",item["request_id"],after=item); return clean(item)
 
 @api.patch("/maintenance/{request_id}")
-async def update_maintenance(request_id: str, payload: MaintenanceStatus, user=Depends(current_user)):
+async def update_maintenance(request_id: str, payload: MaintenanceStatus, user=Depends(require_permission("maintenance_write"))):
     before=clean(await db.maintenance.find_one({"request_id":request_id},{"_id":0}))
     if not before: raise HTTPException(404,"Request not found")
-    await db.maintenance.update_one({"request_id":request_id},{"$set":{"status":payload.status}}); after={**before,"status":payload.status}; await log_event(user,"maintenance status changed","maintenance",request_id,before=before,after=after); return clean(after)
+    if payload.status not in {"Pending","Approved","In progress","Resolved","Rejected"}: raise HTTPException(400,"Invalid status")
+    changes = {"status": payload.status}
+    if payload.status == "Resolved": changes["resolved_at"] = now_iso()
+    if payload.status == "Rejected": changes["rejected_at"] = now_iso()
+    await db.maintenance.update_one({"request_id":request_id},{"$set":changes})
+    after={**before,**changes}; await log_event(user,"maintenance status changed","maintenance",request_id,before=before,after=after); return clean(after)
+
+@api.delete("/maintenance/{request_id}")
+async def delete_maintenance(request_id: str, user=Depends(require_permission("maintenance_write"))):
+    before=clean(await db.maintenance.find_one({"request_id":request_id},{"_id":0}))
+    if not before: raise HTTPException(404,"Request not found")
+    if user.get("role") not in {"Admin","Asset Manager","HOD"} and before.get("raised_by_id") != user.get("user_id"):
+        raise HTTPException(403,"Cannot delete another user's request")
+    await db.maintenance.delete_one({"request_id":request_id})
+    await log_event(user,"maintenance request removed","maintenance",request_id,before=before); return {"ok": True}
 
 @api.get("/activity")
 async def activity(user=Depends(current_user)): return [clean(x) for x in await db.activity.find({}, {"_id":0}).sort("timestamp",-1).to_list(200)]
