@@ -23,8 +23,8 @@ from PyPDF2 import PdfReader
 
 
 ROOT = Path("/app")
-API_BASE = "https://complete-coverage-3.preview.emergentagent.com/api"
-FRONTEND_BASE = "https://complete-coverage-3.preview.emergentagent.com"
+API_BASE = "https://fluid-layout-pro.preview.emergentagent.com/api"
+FRONTEND_BASE = "https://fluid-layout-pro.preview.emergentagent.com"
 RUN_ID = f"TEST_ITER6_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
 ADMIN_EMAIL = "admin@assetflow.edu"
 ADMIN_PASSWORD = "Admin123!"

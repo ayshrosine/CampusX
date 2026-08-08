@@ -22,7 +22,7 @@ else:
 
 
 ROOT = Path("/app")
-API = "https://complete-coverage-3.preview.emergentagent.com/api"
+API = "https://fluid-layout-pro.preview.emergentagent.com/api"
 ADMIN = {"email": "admin@assetflow.edu", "password": "Admin123!"}
 DEMO = {"email": "demo@assetflow.edu", "password": "Campus123!"}
 DEFAULT_BRAND = {

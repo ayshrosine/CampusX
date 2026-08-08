@@ -44,7 +44,7 @@
     "Re-test /scan on a 390x844 viewport after the frontend rebuild/restart and CSS change."
   ],
   "critical_code_review_comments": [
-    "Source file /app/frontend/public/index.html includes the requested PWA meta tags, but https://complete-coverage-3.preview.emergentagent.com/scan serves the old/default head without them; this is a deployment/runtime gap, not just a source-code check.",
+    "Source file /app/frontend/public/index.html includes the requested PWA meta tags, but https://fluid-layout-pro.preview.emergentagent.com/scan serves the old/default head without them; this is a deployment/runtime gap, not just a source-code check.",
     "The QR manual input has an inline style height: 42 and is not covered by the mobile .primary-btn/.secondary-btn min-height rule."
   ],
   "updated_files": [
@@ -63,5 +63,5 @@
   "retest_needed": true,
   "should_main_agent_self_test": true,
   "context_for_next_testing_agent": "Backend regression for the new feature set passed. Browser flow passed for maintenance photo upload/delete, digest UI/print/PDF, and admin branding save/logo upload. Focus next retest on /scan mobile: verify live HTML head meta with document.head/querySelector and measure qr-manual-input bounding box >=44px after manual lookup.",
-  "rca_of_the_issue": "Reproduction: load https://complete-coverage-3.preview.emergentagent.com/scan on 390x844 after admin login; document.head lacks meta[name='apple-mobile-web-app-capable']; manual lookup for AF-2025-1001 succeeds, but [data-testid='qr-manual-input'] bounding box is 217x42. Source indicates public/index.html was edited, but the served preview HTML is stale/default, and the input has inline height:42 that violates the 44px mobile touch target contract. No APIs are MOCKED."
+  "rca_of_the_issue": "Reproduction: load https://fluid-layout-pro.preview.emergentagent.com/scan on 390x844 after admin login; document.head lacks meta[name='apple-mobile-web-app-capable']; manual lookup for AF-2025-1001 succeeds, but [data-testid='qr-manual-input'] bounding box is 217x42. Source indicates public/index.html was edited, but the served preview HTML is stale/default, and the input has inline height:42 that violates the 44px mobile touch target contract. No APIs are MOCKED."
 }

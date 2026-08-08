@@ -13,7 +13,7 @@ import requests
 from pymongo import MongoClient
 
 ROOT = Path("/app")
-API = "https://complete-coverage-3.preview.emergentagent.com/api"
+API = "https://fluid-layout-pro.preview.emergentagent.com/api"
 STATE_PATH = ROOT / "test_reports" / "bug_verification_5_ui_seed.json"
 DEFAULT_BRAND = {
     "institution_name": "AssetFlow Campus",

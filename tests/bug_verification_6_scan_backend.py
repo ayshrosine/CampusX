@@ -11,7 +11,7 @@ import requests
 from pymongo import MongoClient
 
 ROOT = Path("/app")
-BASE = "https://complete-coverage-3.preview.emergentagent.com"
+BASE = "https://fluid-layout-pro.preview.emergentagent.com"
 API = f"{BASE}/api"
 ADMIN = {"email": "admin@assetflow.edu", "password": "Admin123!"}
 DEMO = {"email": "demo@assetflow.edu", "password": "Campus123!"}

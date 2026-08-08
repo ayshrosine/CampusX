@@ -7,7 +7,7 @@ to be executed directly; the tool injects an async Playwright `page` object.
 SCRIPT = r'''
 import os
 
-base = "https://complete-coverage-3.preview.emergentagent.com"
+base = "https://fluid-layout-pro.preview.emergentagent.com"
 failures = []
 
 png_bytes = bytes.fromhex(

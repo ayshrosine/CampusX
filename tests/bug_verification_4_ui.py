@@ -13,7 +13,7 @@ async def run(page):
         await page.set_viewport_size({"width": 1920, "height": 1080})
         page.on("dialog", lambda dialog: asyncio.create_task(dialog.accept()))
 
-        await page.goto("https://complete-coverage-3.preview.emergentagent.com/login", wait_until="domcontentloaded")
+        await page.goto("https://fluid-layout-pro.preview.emergentagent.com/login", wait_until="domcontentloaded")
         await page.wait_for_timeout(800)
         if await page.locator('[data-testid="auth-email-input"]').is_visible():
             await page.locator('[data-testid="auth-email-input"]').fill("admin@assetflow.edu")
@@ -153,7 +153,7 @@ async def run(page):
 
         # Mobile responsive checks.
         await page.set_viewport_size({"width": 390, "height": 844})
-        await page.goto("https://complete-coverage-3.preview.emergentagent.com/dashboard", wait_until="domcontentloaded")
+        await page.goto("https://fluid-layout-pro.preview.emergentagent.com/dashboard", wait_until="domcontentloaded")
         await page.wait_for_selector('[data-testid="mobile-menu-button"]', timeout=10000)
         if not await page.locator('[data-testid="mobile-menu-button"]').is_visible():
             raise Exception("Mobile hamburger not visible")

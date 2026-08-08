@@ -13,7 +13,7 @@ from pymongo import MongoClient
 
 
 ROOT = Path("/app")
-BACKEND_API = os.environ.get("BACKEND_API", "https://complete-coverage-3.preview.emergentagent.com/api")
+BACKEND_API = os.environ.get("BACKEND_API", "https://fluid-layout-pro.preview.emergentagent.com/api")
 
 
 def read_env(path: Path):

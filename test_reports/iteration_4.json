@@ -34,6 +34,6 @@
   "seed_data_creation": "Created temporary TEST_BUG4_* maintenance requests, student users, and one old resolved maintenance record directly in MongoDB for purge verification. Cleanup completed; confirmed 0 TEST_BUG4 maintenance records and 0 test_bug4 users remain.",
   "retest_needed": false,
   "should_main_agent_self_test": false,
-  "context_for_next_testing_agent": "Backend script passed 7/7 checks against https://complete-coverage-3.preview.emergentagent.com/api and direct Atlas DB assetflow_campus. Browser script passed admin UI checks for notifications, role preview, maintenance menu actions, rejected/reopen section, drag-and-drop, downloads, QR manual lookup, and mobile responsive behavior. Camera scanning was not exercised headlessly; QR manual tag lookup was used as instructed.",
+  "context_for_next_testing_agent": "Backend script passed 7/7 checks against https://fluid-layout-pro.preview.emergentagent.com/api and direct Atlas DB assetflow_campus. Browser script passed admin UI checks for notifications, role preview, maintenance menu actions, rejected/reopen section, drag-and-drop, downloads, QR manual lookup, and mobile responsive behavior. Camera scanning was not exercised headlessly; QR manual tag lookup was used as instructed.",
   "rca_of_the_issue": "Verification covered the user-reported fix path rather than reproducing the original broken state. The fixed behavior is supported by backend state transitions/RBAC/purge logic and frontend UI actions wired to PATCH/DELETE endpoints, with no mocked APIs observed."
 }

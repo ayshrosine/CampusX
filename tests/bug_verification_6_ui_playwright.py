@@ -8,7 +8,7 @@ regressions.
 SCRIPT = r'''
 import os
 
-base = "https://complete-coverage-3.preview.emergentagent.com"
+base = "https://fluid-layout-pro.preview.emergentagent.com"
 failures = []
 png_bytes = bytes.fromhex(
     "89504e470d0a1a0a0000000d494844520000000200000002080600000072b60d24"
