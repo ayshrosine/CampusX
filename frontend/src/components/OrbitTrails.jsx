@@ -10,6 +10,7 @@ export default function OrbitTrails({
   background = "#0f1013",
   speed = 1.0,
   trails = 80,
+  additive = true,
   className = "orbit-canvas",
 }) {
   const canvasRef = useRef(null);
