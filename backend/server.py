@@ -9,6 +9,8 @@ from typing import Optional, List
 import os, uuid, secrets, bcrypt, logging, time
 from bson import ObjectId
 import cloudinary, cloudinary.utils, cloudinary.uploader
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -263,18 +265,42 @@ async def update_profile(payload: ProfileUpdate, user=Depends(current_user)):
 
 @api.post("/auth/session")
 async def oauth_session(request: Request, response: Response):
-    session_id = request.headers.get("X-Session-ID")
-    if not session_id: raise HTTPException(400, "Missing session id")
-    import requests
-    remote = requests.get("https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data", headers={"X-Session-ID": session_id}, timeout=15)
-    if remote.status_code != 200: raise HTTPException(401, "Google session could not be verified")
-    data = remote.json(); user = await db.users.find_one({"email": data["email"]}, {"_id": 0})
-    if not user:
-        user = {"user_id": f"user_{uuid.uuid4().hex[:12]}", "name": data.get("name", data["email"].split("@")[0]), "email": data["email"], "role": "Student", "department": "Computer Science", "status": "Pending", "picture": data.get("picture", ""), "created_at": now_iso()}
-        await db.users.insert_one(user)
-        await log_event(user, "account created with Google", "user", user["user_id"], after={"email": user["email"], "role": user["role"]})
-    token = await create_session(user["user_id"])
-    return session_response(Response(content=__import__("json").dumps({k:v for k,v in user.items() if k != "password_hash"}), media_type="application/json"), token)
+    try:
+        token = payload.credential
+        if not token: raise HTTPException(400, "Missing Google ID token")
+        
+        idinfo = id_token.verify_oauth2_token(
+            token, 
+            google_requests.Request(), 
+            os.environ.get("GOOGLE_CLIENT_ID")
+        )
+        
+        if idinfo["iss"] not in ["accounts.google.com", "https://accounts.google.com"]:
+            raise HTTPException(401, "Wrong issuer")
+            
+        if idinfo["email"] and idinfo["email_verified"]:
+            user = await db.users.find_one({"email": idinfo["email"]}, {"_id": 0})
+            if not user:
+                user = {
+                    "user_id": f"user_{uuid.uuid4().hex[:12]}", 
+                    "name": idinfo.get("name", idinfo["email"].split("@")[0]), 
+                    "email": idinfo["email"], 
+                    "role": "Student", 
+                    "department": "Computer Science", 
+                    "status": "Pending", 
+                    "picture": idinfo.get("picture", ""), 
+                    "created_at": now_iso()
+                }
+                await db.users.insert_one(user)
+                await log_event(user, "account created with Google", "user", user["user_id"], after={"email": user["email"], "role": user["role"]})
+            
+            session_token = await create_session(user["user_id"])
+            return session_response(Response(content=__import__("json").dumps({k:v for k,v in user.items() if k != "password_hash"}), media_type="application/json"), session_token)
+        else:
+            raise HTTPException(401, "Email not verified")
+            
+    except Exception as e:
+        raise HTTPException(401, f"Invalid Google token: {str(e)}")
 
 @api.post("/auth/logout")
 async def logout(request: Request, response: Response):
