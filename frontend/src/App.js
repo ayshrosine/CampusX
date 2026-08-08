@@ -5,6 +5,7 @@ import { Toaster, toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
 import { Html5Qrcode } from "html5-qrcode";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
+import OrbitTrails from "@/components/OrbitTrails";
 import "@/App.css";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -170,7 +171,8 @@ function Login() {
   };
 
   return (
-    <main className="auth-page">
+    <main className="auth-page auth-page--orbit">
+      <OrbitTrails colors={["#8f7bff", "#5b6cff", "#c96af2"]} background="#0f1013" speed={1.0} trails={80} />
       <div className="auth-nav">
         <div className="brand"><span style={{ color: "var(--ink)" }}><LogoMark size={26} /></span> AssetFlow</div>
         <ThemeToggleButton dark={dark} setDark={setDark} />
