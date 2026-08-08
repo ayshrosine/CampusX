@@ -42,6 +42,13 @@ class AssetCreate(BaseModel):
     status: str = "Available"
     serial: str = ""
     bookable: bool = False
+    # --- Detailed registration fields (optional, non-breaking) ---
+    supplier: str = ""
+    purchase_cost: float = 0
+    purchase_date: str = ""
+    warranty_end: str = ""
+    amc_provider: str = ""
+    notes: str = ""
 
 class AssetUpdate(BaseModel):
     name: Optional[str] = None
@@ -57,6 +64,10 @@ class MaintenanceCreate(BaseModel):
     asset_id: str
     description: str
     priority: str = "Medium"
+    # --- Detailed work-order fields (optional, non-breaking) ---
+    category: str = ""
+    location: str = ""
+    reporter_contact: str = ""
 
 class MaintenanceStatus(BaseModel):
     status: str
@@ -394,6 +405,41 @@ async def change_role(user_id: str, payload: RoleChange, user=Depends(require_pe
     after = {**before, "role": payload.role, "status": payload.status}
     await log_event(user, "role approval changed", "user", user_id, before={"role": before.get("role"), "status": before.get("status")}, after={"role": payload.role, "status": payload.status})
     return {k: v for k, v in clean(after).items() if k != "password_hash"}
+
+class BulkRoleChange(BaseModel):
+    user_ids: List[str] = Field(min_length=1)
+    role: str
+    status: str = "Active"
+
+@api.post("/admin/users/bulk-role")
+async def bulk_change_role(payload: BulkRoleChange, user=Depends(require_permission("admin"))):
+    if payload.role not in ROLES: raise HTTPException(400, "Unknown role")
+    updated, skipped = [], []
+    for uid in payload.user_ids:
+        target = await db.users.find_one({"user_id": uid}, {"_id": 0})
+        if not target: skipped.append({"user_id": uid, "reason": "not found"}); continue
+        if uid == user["user_id"] and payload.role != "Admin": skipped.append({"user_id": uid, "reason": "cannot remove own admin access"}); continue
+        if target.get("email") == "admin@assetflow.edu" and payload.role != "Admin": skipped.append({"user_id": uid, "reason": "root admin protected"}); continue
+        await db.users.update_one({"user_id": uid}, {"$set": {"role": payload.role, "status": payload.status}})
+        await db.user_sessions.delete_many({"user_id": uid})
+        updated.append(uid)
+    await log_event(user, f"bulk role change to {payload.role}", "user", "batch", after={"count": len(updated), "role": payload.role, "status": payload.status})
+    return {"updated": len(updated), "skipped": skipped, "role": payload.role, "status": payload.status}
+
+@api.get("/search")
+async def global_search(q: str = "", user=Depends(current_user)):
+    q = (q or "").strip()
+    empty = {"assets": [], "users": [], "bookings": [], "maintenance": []}
+    if len(q) < 1: return empty
+    rx = {"$regex": q, "$options": "i"}
+    assets = await db.assets.find({"$or": [{"name": rx}, {"tag": rx}, {"serial": rx}, {"location": rx}, {"category": rx}]}, {"_id": 0}).limit(6).to_list(6)
+    maints = await db.maintenance.find({"$or": [{"description": rx}, {"asset_id": rx}, {"priority": rx}, {"status": rx}]}, {"_id": 0}).limit(6).to_list(6)
+    bookings = await db.bookings.find({"$or": [{"resource_name": rx}, {"event_title": rx}, {"purpose": rx}, {"requested_by": rx}]}, {"_id": 0}).limit(6).to_list(6)
+    users_out = []
+    if user.get("role") == "Admin":
+        us = await db.users.find({"$or": [{"name": rx}, {"email": rx}, {"department": rx}, {"role": rx}]}, {"_id": 0, "password_hash": 0}).limit(6).to_list(6)
+        users_out = [clean(u) for u in us]
+    return {"assets": [clean(a) for a in assets], "maintenance": [clean(m) for m in maints], "bookings": [clean(b) for b in bookings], "users": users_out}
 
 @api.get("/bookings")
 async def get_bookings(date: str = "", user=Depends(current_user)):

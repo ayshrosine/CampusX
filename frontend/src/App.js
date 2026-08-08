@@ -316,33 +316,48 @@ function RolePreviewModal({ onClose }) {
    ============================================================ */
 function GlobalSearch({ onClose }) {
   const [q, setQ] = useState("");
-  const [assets, setAssets] = useState([]);
+  const [res, setRes] = useState({ assets: [], users: [], bookings: [], maintenance: [] });
   const navigate = useNavigate();
   useEffect(() => {
     const id = setTimeout(() => {
-      if (q.trim().length >= 1) api(`/assets?search=${encodeURIComponent(q.trim())}`).then((a) => setAssets(a.slice(0, 8))).catch(() => {});
-      else setAssets([]);
+      if (q.trim().length >= 1) api(`/search?q=${encodeURIComponent(q.trim())}`).then(setRes).catch(() => {});
+      else setRes({ assets: [], users: [], bookings: [], maintenance: [] });
     }, 200);
     return () => clearTimeout(id);
   }, [q]);
   const pages = q ? nav.filter((n) => n.label.toLowerCase().includes(q.toLowerCase())) : [];
   const go = (to) => { navigate(to); onClose(); };
+  const firstTarget = () => {
+    if (res.assets[0]) return `/inventory/${res.assets[0].asset_id}`;
+    if (pages[0]) return pages[0].to;
+    if (res.maintenance[0]) return "/maintenance";
+    if (res.bookings[0]) return "/bookings";
+    if (res.users[0]) return "/admin";
+    return null;
+  };
+  const total = pages.length + res.assets.length + res.maintenance.length + res.bookings.length + res.users.length;
   return (
     <div className="modal-backdrop search-backdrop" onClick={onClose} data-testid="global-search-overlay">
       <div className="search-panel" onClick={(e) => e.stopPropagation()}>
         <div className="search-input-row">
           <Search size={16} />
-          <input autoFocus data-testid="global-search-input" placeholder="Search assets and pages…" value={q} onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { if (assets[0]) go(`/inventory/${assets[0].asset_id}`); else if (pages[0]) go(pages[0].to); } if (e.key === "Escape") onClose(); }} />
+          <input autoFocus data-testid="global-search-input" placeholder="Search assets, users, bookings, tickets, pages…" value={q} onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { const t = firstTarget(); if (t) go(t); } if (e.key === "Escape") onClose(); }} />
           <button className="icon-btn" onClick={onClose} aria-label="Close"><X size={16} /></button>
         </div>
         <div className="search-results">
           {pages.length > 0 && <div className="search-group">Pages</div>}
           {pages.map((p) => <button key={p.to} className="search-item" data-testid="search-result-page" onClick={() => go(p.to)}><p.icon size={15} /> <span><b>{p.label}</b></span></button>)}
-          {assets.length > 0 && <div className="search-group">Assets</div>}
-          {assets.map((a) => <button key={a.asset_id} className="search-item" data-testid="search-result-asset" onClick={() => go(`/inventory/${a.asset_id}`)}><Package size={15} /> <span><b>{a.name}</b><small>{a.tag} · {a.location}</small></span></button>)}
-          {q && assets.length === 0 && pages.length === 0 && <div className="search-empty">No matches for &ldquo;{q}&rdquo;</div>}
-          {!q && <div className="search-empty">Type to search assets and jump to pages…</div>}
+          {res.assets.length > 0 && <div className="search-group">Assets</div>}
+          {res.assets.map((a) => <button key={a.asset_id} className="search-item" data-testid="search-result-asset" onClick={() => go(`/inventory/${a.asset_id}`)}><Package size={15} /> <span><b>{a.name}</b><small>{a.tag} · {a.location}</small></span></button>)}
+          {res.maintenance.length > 0 && <div className="search-group">Maintenance</div>}
+          {res.maintenance.map((m) => <button key={m.request_id} className="search-item" data-testid="search-result-maintenance" onClick={() => go("/maintenance")}><Wrench size={15} /> <span><b>{m.description}</b><small>{m.asset_id} · {m.priority} · {m.status}</small></span></button>)}
+          {res.bookings.length > 0 && <div className="search-group">Bookings</div>}
+          {res.bookings.map((b) => <button key={b.booking_id} className="search-item" data-testid="search-result-booking" onClick={() => go("/bookings")}><Clock3 size={15} /> <span><b>{b.event_title || b.purpose}</b><small>{b.resource_name || b.resource_id} · {b.date}</small></span></button>)}
+          {res.users.length > 0 && <div className="search-group">Users</div>}
+          {res.users.map((u) => <button key={u.user_id} className="search-item" data-testid="search-result-user" onClick={() => go("/admin")}><User size={15} /> <span><b>{u.name}</b><small>{u.email} · {u.role}</small></span></button>)}
+          {q && total === 0 && <div className="search-empty">No matches for &ldquo;{q}&rdquo;</div>}
+          {!q && <div className="search-empty">Search assets, users, bookings, tickets and pages…</div>}
         </div>
       </div>
     </div>
@@ -557,17 +572,16 @@ function Inventory() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("All");
   const [show, setShow] = useState(false);
-  const [newAsset, setNewAsset] = useState({ name: "", category: "IT Equipment", location: "", department: "Computer Science" });
+  const [newAsset, setNewAsset] = useState({ name: "", category: "IT Equipment", location: "", department: "Computer Science", status: "Available", serial: "", bookable: false, supplier: "", purchase_cost: "", purchase_date: "", warranty_end: "", amc_provider: "", notes: "" });
   const load = useCallback(() => api(`/assets?search=${encodeURIComponent(search)}&status=${status}`).then(setAssets).catch((e) => toast.error(e.message)), [search, status]);
   useEffect(() => { load(); }, [load]);
+  const resetAsset = () => setNewAsset({ name: "", category: "IT Equipment", location: "", department: "Computer Science", status: "Available", serial: "", bookable: false, supplier: "", purchase_cost: "", purchase_date: "", warranty_end: "", amc_provider: "", notes: "" });
   const save = async (e) => {
     e.preventDefault();
     try {
-      await api("/assets", { method: "POST", body: JSON.stringify(newAsset) });
+      await api("/assets", { method: "POST", body: JSON.stringify({ ...newAsset, purchase_cost: Number(newAsset.purchase_cost) || 0 }) });
       toast.success("Asset registered and logged");
-      setShow(false);
-      setNewAsset({ name: "", category: "IT Equipment", location: "", department: "Computer Science" });
-      load();
+      setShow(false); resetAsset(); load();
     } catch (err) { toast.error(err.message); }
   };
   return (
@@ -596,18 +610,45 @@ function Inventory() {
       </section>
       {show && (
         <div className="modal-backdrop" onClick={() => setShow(false)}>
-          <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={save}>
+          <form className="modal modal-wide" onClick={(e) => e.stopPropagation()} onSubmit={save}>
             <div className="modal-title">
               <div><p className="eyebrow">NEW RECORD</p><h2>Register an asset</h2></div>
               <button data-testid="close-asset-modal-button" type="button" className="icon-btn" onClick={() => setShow(false)}><X size={14} /></button>
             </div>
-            {[["name", "Asset name"], ["location", "Location"], ["department", "Department"]].map(([key, label]) => (
-              <input data-testid={`new-asset-${key}-input`} key={key} placeholder={label} value={newAsset[key]} onChange={(e) => setNewAsset({ ...newAsset, [key]: e.target.value })} required />
-            ))}
-            <select data-testid="new-asset-category-select" value={newAsset.category} onChange={(e) => setNewAsset({ ...newAsset, category: e.target.value })}>
-              <option>IT Equipment</option><option>Lab Equipment</option><option>Workshop Machinery</option><option>Sports Gear</option>
-            </select>
-            <button data-testid="register-asset-submit-button" className="primary-btn">Register asset <Check size={13} /></button>
+            <div className="nb-field"><label>Asset name</label><input data-testid="new-asset-name-input" className="nb-input" placeholder="e.g. Epson Projector EB-X06" value={newAsset.name} onChange={(e) => setNewAsset({ ...newAsset, name: e.target.value })} required /></div>
+            <div className="nb-row">
+              <div className="nb-field"><label>Category</label>
+                <select data-testid="new-asset-category-select" className="nb-input" value={newAsset.category} onChange={(e) => setNewAsset({ ...newAsset, category: e.target.value })}>
+                  <option>IT Equipment</option><option>Lab Equipment</option><option>Workshop Machinery</option><option>Media Equipment</option><option>Room</option><option>Vehicle</option><option>Sports Gear</option>
+                </select>
+              </div>
+              <div className="nb-field"><label>Status</label>
+                <select data-testid="new-asset-status-select" className="nb-input" value={newAsset.status} onChange={(e) => setNewAsset({ ...newAsset, status: e.target.value })}>
+                  <option>Available</option><option>Allocated</option><option>Under Maintenance</option>
+                </select>
+              </div>
+            </div>
+            <div className="nb-row">
+              <div className="nb-field"><label>Location</label><input data-testid="new-asset-location-input" className="nb-input" placeholder="e.g. Seminar Hall A" value={newAsset.location} onChange={(e) => setNewAsset({ ...newAsset, location: e.target.value })} required /></div>
+              <div className="nb-field"><label>Department</label><input data-testid="new-asset-department-input" className="nb-input" placeholder="e.g. Computer Science" value={newAsset.department} onChange={(e) => setNewAsset({ ...newAsset, department: e.target.value })} required /></div>
+            </div>
+            <div className="nb-row">
+              <div className="nb-field"><label>Serial number</label><input data-testid="new-asset-serial-input" className="nb-input" placeholder="SN-XXXX (optional)" value={newAsset.serial} onChange={(e) => setNewAsset({ ...newAsset, serial: e.target.value })} /></div>
+              <div className="nb-field"><label>Supplier / vendor</label><input data-testid="new-asset-supplier-input" className="nb-input" placeholder="Who supplied it" value={newAsset.supplier} onChange={(e) => setNewAsset({ ...newAsset, supplier: e.target.value })} /></div>
+            </div>
+            <div className="nb-row">
+              <div className="nb-field"><label>Purchase cost (₹)</label><input data-testid="new-asset-cost-input" className="nb-input" type="number" min="0" step="0.01" placeholder="0.00" value={newAsset.purchase_cost} onChange={(e) => setNewAsset({ ...newAsset, purchase_cost: e.target.value })} /></div>
+              <div className="nb-field"><label>Purchase date</label><input data-testid="new-asset-purchase-date-input" className="nb-input" type="date" value={newAsset.purchase_date} onChange={(e) => setNewAsset({ ...newAsset, purchase_date: e.target.value })} /></div>
+            </div>
+            {newAsset.category !== "Sports Gear" && newAsset.category !== "Room" && (
+              <div className="nb-row">
+                <div className="nb-field"><label>Warranty end date</label><input data-testid="new-asset-warranty-input" className="nb-input" type="date" value={newAsset.warranty_end} onChange={(e) => setNewAsset({ ...newAsset, warranty_end: e.target.value })} /></div>
+                <div className="nb-field"><label>AMC provider</label><input data-testid="new-asset-amc-input" className="nb-input" placeholder="Annual maintenance contract" value={newAsset.amc_provider} onChange={(e) => setNewAsset({ ...newAsset, amc_provider: e.target.value })} /></div>
+              </div>
+            )}
+            <div className="nb-field"><label>Notes</label><textarea data-testid="new-asset-notes-input" className="nb-textarea" placeholder="Any extra details…" value={newAsset.notes} onChange={(e) => setNewAsset({ ...newAsset, notes: e.target.value })} /></div>
+            <label className="ac-checkline" style={{ marginBottom: 12 }}><input type="checkbox" data-testid="new-asset-bookable-checkbox" checked={newAsset.bookable} onChange={(e) => setNewAsset({ ...newAsset, bookable: e.target.checked })} /> This asset is bookable (rooms, projectors, vehicles, laptops)</label>
+            <button data-testid="register-asset-submit-button" className="primary-btn nb-confirm">Register asset <Check size={13} /></button>
           </form>
         </div>
       )}
@@ -759,15 +800,23 @@ function MaintenanceCard({ x, stage, onAdvance, onSetStatus, onDelete, onAttach,
 
 function Maintenance() {
   const [items, setItems] = useState([]);
+  const [assets, setAssets] = useState([]);
   const [show, setShow] = useState(false);
-  const [form, setForm] = useState({ asset_id: "ast_seed_2", description: "", priority: "Medium" });
+  const [form, setForm] = useState({ asset_id: "", description: "", priority: "Medium", category: "", location: "", reporter_contact: "" });
   const load = useCallback(() => api("/maintenance").then(setItems), []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); api("/assets").then(setAssets).catch(() => {}); }, [load]);
+  const pickAsset = (id) => {
+    const a = assets.find((x) => x.asset_id === id);
+    setForm((f) => ({ ...f, asset_id: id, category: a?.category || f.category, location: a?.location || f.location }));
+  };
   const save = async (e) => {
     e.preventDefault();
+    if (!form.asset_id) { toast.error("Please choose an asset"); return; }
     try {
       await api("/maintenance", { method: "POST", body: JSON.stringify(form) });
-      toast.success("Request raised and logged"); setShow(false); load();
+      toast.success("Request raised and logged"); setShow(false);
+      setForm({ asset_id: "", description: "", priority: "Medium", category: "", location: "", reporter_contact: "" });
+      load();
     } catch (err) { toast.error(err.message); }
   };
   const setStatus = async (x, status) => {
@@ -862,12 +911,24 @@ function Maintenance() {
         <div className="modal-backdrop" onClick={() => setShow(false)}>
           <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={save}>
             <div className="modal-title"><div><p className="eyebrow">WORK ORDER</p><h2>Raise maintenance</h2></div><button data-testid="close-maintenance-modal-button" type="button" className="icon-btn" onClick={() => setShow(false)}><X size={14} /></button></div>
-            <input data-testid="maintenance-asset-id-input" placeholder="Asset ID" value={form.asset_id} onChange={(e) => setForm({ ...form, asset_id: e.target.value })} />
-            <textarea data-testid="maintenance-description-input" placeholder="What needs attention?" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} required />
-            <select data-testid="maintenance-priority-select" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
-              <option>Low</option><option>Medium</option><option>High</option>
-            </select>
-            <button data-testid="maintenance-submit-button" className="primary-btn">Raise request <Wrench size={13} /></button>
+            <div className="nb-field"><label>Asset</label>
+              <select data-testid="maintenance-asset-select" className="nb-input" value={form.asset_id} onChange={(e) => pickAsset(e.target.value)} required>
+                <option value="">Select an asset…</option>
+                {assets.map((a) => <option key={a.asset_id} value={a.asset_id}>{a.tag} · {a.name}</option>)}
+              </select>
+            </div>
+            <div className="nb-row">
+              <div className="nb-field"><label>Severity</label>
+                <select data-testid="maintenance-priority-select" className="nb-input" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
+                  <option>Low</option><option>Medium</option><option>High</option>
+                </select>
+              </div>
+              <div className="nb-field"><label>Category</label><input data-testid="maintenance-category-input" className="nb-input" placeholder="e.g. Electrical" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></div>
+            </div>
+            <div className="nb-field"><label>Location</label><input data-testid="maintenance-location-input" className="nb-input" placeholder="Where is the asset?" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></div>
+            <div className="nb-field"><label>Reporter contact (phone / email)</label><input data-testid="maintenance-contact-input" className="nb-input" placeholder="Who to reach about this issue" value={form.reporter_contact} onChange={(e) => setForm({ ...form, reporter_contact: e.target.value })} /></div>
+            <div className="nb-field"><label>Description</label><textarea data-testid="maintenance-description-input" className="nb-textarea" placeholder="What needs attention?" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} required /></div>
+            <button data-testid="maintenance-submit-button" className="primary-btn nb-confirm">Raise request <Wrench size={13} /></button>
           </form>
         </div>
       )}
@@ -1207,22 +1268,61 @@ function NoDues() {
 
 function AccessControlPanel({ users, reload }) {
   const [q, setQ] = useState("");
+  const [sel, setSel] = useState([]);
+  const [bulkRole, setBulkRole] = useState("Asset Manager");
+  const [bulkStatus, setBulkStatus] = useState("Active");
+  const [busy, setBusy] = useState(false);
   const apply = async (u, role, status) => {
     try { await api(`/admin/users/${u.user_id}/role`, { method: "PATCH", body: JSON.stringify({ role, status }) }); toast.success(`Updated ${u.name} → ${role}`); reload(); }
     catch (e) { toast.error(e.message); }
   };
   const filtered = users.filter((u) => [u.name, u.email, u.department, u.role, u.status].join(" ").toLowerCase().includes(q.toLowerCase()));
+  const selectable = filtered.filter((u) => u.email !== "admin@assetflow.edu");
+  const toggle = (id) => setSel((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
+  const allSelected = selectable.length > 0 && selectable.every((u) => sel.includes(u.user_id));
+  const toggleAll = () => setSel(allSelected ? [] : selectable.map((u) => u.user_id));
+  const applyBulk = async () => {
+    if (sel.length === 0) return;
+    setBusy(true);
+    try {
+      const r = await api("/admin/users/bulk-role", { method: "POST", body: JSON.stringify({ user_ids: sel, role: bulkRole, status: bulkStatus }) });
+      toast.success(`${r.updated} user(s) set to ${bulkRole}${r.skipped?.length ? ` · ${r.skipped.length} skipped` : ""}`);
+      setSel([]); reload();
+    } catch (e) { toast.error(e.message); } finally { setBusy(false); }
+  };
   return (
     <section className="surface" data-testid="access-control-panel" style={{ marginTop: 16 }}>
       <div className="section-title"><div><p className="eyebrow">ACCESS CONTROL</p><h3>Set any user&rsquo;s role &amp; access</h3></div><small className="muted">{filtered.length} of {users.length} users</small></div>
       <div className="ac-search"><Search size={15} /><input data-testid="access-search-input" placeholder="Search users by name, email, department, role or status…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+      {selectable.length > 0 && (
+        <div className="ac-selectbar">
+          <label className="ac-checkline"><input type="checkbox" data-testid="access-select-all" checked={allSelected} onChange={toggleAll} /> Select all ({selectable.length})</label>
+          {sel.length > 0 && (
+            <div className="ac-bulkbar" data-testid="access-bulk-bar">
+              <span className="ac-selcount">{sel.length} selected</span>
+              <select data-testid="access-bulk-role" value={bulkRole} onChange={(e) => setBulkRole(e.target.value)}>
+                <option>Student</option><option>Employee</option><option>HOD</option><option>Asset Manager</option><option>Admin</option>
+              </select>
+              <select data-testid="access-bulk-status" value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value)}>
+                <option>Active</option><option>Pending</option><option>Suspended</option>
+              </select>
+              <button className="primary-btn compact" data-testid="access-bulk-apply" disabled={busy} onClick={applyBulk}>{busy ? "Applying…" : `Apply to ${sel.length}`}</button>
+              <button className="link-btn" onClick={() => setSel([])}>Clear</button>
+            </div>
+          )}
+        </div>
+      )}
       <div className="ac-list">
         {filtered.length === 0 && <div className="empty">No users match &ldquo;{q}&rdquo;.</div>}
         {filtered.map((u) => {
           const isRootAdmin = u.email === "admin@assetflow.edu";
           return (
-            <div className="ac-row" data-testid="access-user-row" key={u.user_id}>
-              <div className="ac-user"><span className="avatar-sm">{initials(u.name)}</span><div><b>{u.name}</b><small>{u.email} · {u.department || "—"}</small></div></div>
+            <div className={`ac-row${sel.includes(u.user_id) ? " selected" : ""}`} data-testid="access-user-row" key={u.user_id}>
+              <div className="ac-user">
+                {!isRootAdmin && <input type="checkbox" data-testid="access-row-checkbox" checked={sel.includes(u.user_id)} onChange={() => toggle(u.user_id)} />}
+                {isRootAdmin && <span className="ac-checkbox-spacer" />}
+                <span className="avatar-sm">{initials(u.name)}</span><div><b>{u.name}</b><small>{u.email} · {u.department || "—"}</small></div>
+              </div>
               <div className="ac-controls">
                 <label className="ac-field"><span>Role</span>
                   <select data-testid="access-role-select" value={u.role} disabled={isRootAdmin} onChange={(e) => apply(u, e.target.value, u.status || "Active")}>

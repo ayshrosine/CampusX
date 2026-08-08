@@ -164,15 +164,118 @@ backend:
 
 metadata:
   created_by: "main_agent"
-  version: "1.5"
-  test_sequence: 5
+  version: "1.7"
+  test_sequence: 7
   run_ui: true
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "Bulk role assign endpoint POST /admin/users/bulk-role"
+    - "Unified search endpoint GET /search"
+    - "Extended asset & maintenance create fields"
+    - "Access Control bulk-select UI"
+    - "Detailed Maintenance work-order form"
+    - "Detailed Asset Registration form"
+    - "Search Everything palette (assets/users/bookings/maintenance/pages)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+backend:
+  - task: "Bulk role assign endpoint POST /admin/users/bulk-role"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "New POST /api/admin/users/bulk-role {user_ids:[], role, status} (admin only). Applies role/status to many users; skips root admin demotion and self-demotion; returns {updated, skipped[]}. Verify: select 2 student ids, set Asset Manager -> updated=2; passing admin's own id with non-Admin role is skipped; unknown role -> 400; non-admin -> 403."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ ALL TESTS PASSED (8/8). Successfully tested bulk role assignment: (1) GET /admin/users returns 9 users. (2) Bulk assigned Asset Manager role to ananya and vikram - updated=2, skipped=0. (3) Verified role changes persisted in database. (4) Admin self-demotion correctly skipped with reason 'cannot remove own admin access'. (5) Unknown role 'SuperKing' correctly rejected with 400. (6) Cleanup successful - users reset to Student. (7) Non-admin (Asset Manager) correctly rejected with 403. All validations and RBAC working correctly."
+  - task: "Unified search endpoint GET /search"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "New GET /api/search?q= returns {assets, maintenance, bookings, users}. Case-insensitive regex. users only populated for Admin role. Verify q=projector returns assets; q=ananya returns a user for admin but empty users for a non-admin (e.g. Asset Manager)."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ ALL TESTS PASSED (5/5). Unified search endpoint working correctly: (1) Admin search 'projector' returns 3 assets (e.g., Epson Projector EB-X06). (2) Admin search 'ananya' returns 1 user (Ananya Rao, ananya@assetflow.edu). (3) Asset Manager search 'ananya' correctly returns empty users array (RBAC working - users only exposed to Admin). (4) Asset Manager still gets assets/maintenance/bookings arrays. (5) Empty search (q=) returns all empty arrays. All response structures correct with keys: assets, maintenance, bookings, users."
+  - task: "Extended asset & maintenance create fields"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "AssetCreate now accepts supplier, purchase_cost(float), purchase_date, warranty_end, amc_provider, notes, status, serial, bookable. MaintenanceCreate now accepts category, location, reporter_contact. All optional/non-breaking. Verify POST /assets and POST /maintenance persist and return these fields."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ ALL TESTS PASSED (2/2). Extended create fields working correctly: (1) POST /assets with all extended fields successful - created asset with supplier='Acme Electronics Ltd', purchase_cost=1250.50, purchase_date='2025-01-10', warranty_end='2027-01-10', amc_provider='Acme AMC Services', notes='High-resolution projector...', bookable=true, serial='PROJ-2025-XYZ-789'. All fields persisted and returned in response. (2) POST /maintenance with extended fields successful - created maintenance request with category='Electrical', location='Lab 1 - Computer Science Building', reporter_contact='9998887777'. All fields persisted and returned. Non-breaking changes confirmed."
+
+frontend:
+  - task: "Access Control bulk-select UI (multi-select + bulk apply)"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/App.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "AccessControlPanel now has a per-row checkbox (access-row-checkbox), Select all (access-select-all), and a bulk bar (access-bulk-bar) with role (access-bulk-role) + status (access-bulk-status) selects and Apply (access-bulk-apply) calling POST /admin/users/bulk-role. Verify selecting 2 users, choosing Asset Manager, Apply -> success toast + roles updated; root admin has no checkbox."
+  - task: "Detailed Maintenance work-order form"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/App.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Raise-maintenance modal now has an Asset picker dropdown (maintenance-asset-select, populated from /assets; auto-fills category+location), Severity (maintenance-priority-select), Category (maintenance-category-input), Location (maintenance-location-input), Reporter contact (maintenance-contact-input), Description (maintenance-description-input). Verify creating a ticket via the picker succeeds and card appears on the board."
+  - task: "Detailed Asset Registration form"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/App.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Register-asset modal now has name, category (select), status, location, department, serial, supplier, purchase cost (number), purchase date, and category-specific warranty end + AMC provider (hidden for Room/Sports Gear), notes, and a bookable checkbox. Verify registering an IT Equipment asset with warranty+cost succeeds and appears in inventory; registering a Sports Gear hides warranty/AMC."
+  - task: "Search Everything palette"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/App.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Global search (⌘K) now calls /search and renders grouped results: Pages, Assets (->/inventory/:id), Maintenance (->/maintenance), Bookings (->/bookings), Users (->/admin). Verify typing 'projector' shows Assets group; 'ananya' shows a Users group (admin); clicking a maintenance/booking/user result navigates to the right page."
+
+agent_communication:
+    -agent: "main"
+    -message: "New round of 4 enhancements: (1) bulk role assign (backend POST /admin/users/bulk-role + Access Control multi-select UI); (2) detailed Maintenance work-order form (asset picker/severity/category/location/reporter contact); (3) detailed Asset Registration form (supplier/cost/purchase date/warranty/AMC/notes/bookable, category-specific); (4) Search Everything palette + unified GET /search. Please verify current_focus. Credentials in /app/memory/test_credentials.md (admin@assetflow.edu / Admin123!; asset manager demo@assetflow.edu / Campus123!)."
+    -agent: "testing"
+    -message: "✅ BACKEND TESTING COMPLETE - ALL 3 FEATURES WORKING (15/15 tests passed). Comprehensive testing of new backend endpoints completed: (1) BULK ROLE ASSIGN: 8/8 tests passed - bulk assignment working, admin self-demotion protection working, unknown role validation working, non-admin 403 working. (2) UNIFIED SEARCH: 5/5 tests passed - search returns correct results for assets/users/maintenance/bookings, RBAC working (users only visible to Admin), empty search working. (3) EXTENDED CREATE FIELDS: 2/2 tests passed - POST /assets with all extended fields (supplier, purchase_cost, warranty_end, amc_provider, notes, bookable, serial) working, POST /maintenance with extended fields (category, location, reporter_contact) working. All backend APIs verified end-to-end. NO ISSUES FOUND. Frontend testing still pending (Access Control bulk-select UI, Detailed Maintenance form, Detailed Asset Registration form, Search Everything palette)."
 
 backend:
   - task: "Profile update endpoint PATCH /auth/profile"

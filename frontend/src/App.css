@@ -499,3 +499,17 @@ input[type="datetime-local"].nb-input{width:100%;min-width:0}
 .ac-field select{height:38px;background:var(--elev);border:1px solid var(--hairline);border-radius:var(--radius-sm);color:var(--ink);padding:0 10px;font-size:13px;cursor:pointer}
 .ac-field select:disabled{opacity:.5;cursor:not-allowed}
 @media (max-width:560px){.ac-controls{width:100%}.ac-field{flex:1}}
+
+/* ===== Tall modals scroll ===== */
+.modal{max-height:90vh;overflow-y:auto}
+
+/* ===== Access control bulk select ===== */
+.ac-selectbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.ac-checkline{display:inline-flex;align-items:center;gap:8px;font:500 13px var(--font-sans);color:var(--body);cursor:pointer}
+.ac-checkline input,.ac-user input[type="checkbox"]{width:16px;height:16px;accent-color:var(--ink);cursor:pointer}
+.ac-checkbox-spacer{width:16px;display:inline-block}
+.ac-bulkbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--raised);border:1px solid var(--hairline);border-radius:var(--radius-md);padding:8px 12px}
+.ac-selcount{font:600 12px var(--font-mono);color:var(--ink)}
+.ac-bulkbar select{height:34px;background:var(--elev);border:1px solid var(--hairline);border-radius:var(--radius-sm);color:var(--ink);padding:0 8px;font-size:13px;cursor:pointer}
+.ac-row.selected{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+.ac-user{gap:10px}
