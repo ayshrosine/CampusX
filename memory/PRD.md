@@ -32,6 +32,19 @@ Make sure every single function, every single button, and every single page shou
 - 2026-08-07: Added server-side non-blank validators for department/category names, booking purpose, and audit department/period fields (whitespace-only inputs now return 422).
 - 2026-08-07: Fixed `react-hooks/exhaustive-deps` warnings in Inventory and AssetDetail by wrapping `load` in `useCallback`.
 
+- 2026-08-08: Switched backend/.env MONGO_URL to user's Atlas cluster; DB_NAME=assetflow_campus; seed re-populated.
+- 2026-08-08: Added Vercel/Geist-inspired UI overhaul (light+dark), mesh-gradient login, custom AssetFlow logo.
+- 2026-08-08: Added Notifications drawer with real feed (maintenance/booking/approval/audit) + unread badge.
+- 2026-08-08: Added Role Playground modal (admin previews visible pages & capabilities for any role).
+- 2026-08-08: Added QR scan (/scan) with camera + manual tag lookup; asset detail shows scannable QR panel.
+- 2026-08-08: Added accreditation report CSV + PDF downloads on Reports and Admin console.
+- 2026-08-08: Rebuilt maintenance kanban with drag-and-drop (@hello-pangea/dnd), per-card action menu (Move/Resolve/Reject/Delete), Rejected section with Reopen/Delete, 30-day auto-purge of resolved.
+- 2026-08-08: Admin Organization Setup uses tabs (Departments / Categories / Staff / Students) per wireframes.
+- 2026-08-08: Activity tabs match wireframes (All / Alerts / Approvals / Bookings).
+- 2026-08-08: Tightened mobile responsive rules (touch-friendly targets, horizontal-scroll tabs, scan viewport).
+- 2026-08-08: Server-side RBAC extended to maintenance mutations; DELETE requires owner or management role.
+- 2026-08-08: API error toasts now surface FastAPI 422 field messages instead of "[object Object]".
+
 ## Prioritized backlog
 - P0: Add admin-only RBAC screens for organization setup, account approvals, and audit-cycle closure.
 - P1: Add resource booking calendar with overlap validation and bundled resources.
