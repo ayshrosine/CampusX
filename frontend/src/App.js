@@ -1153,7 +1153,7 @@ function ScanPage() {
         )}
         <div className="qr-hint">Point at an asset tag or paste it manually.</div>
         <form onSubmit={(e) => { e.preventDefault(); if (manualTag.trim()) resolveTag(manualTag.trim()); }} style={{ display: "flex", gap: 8 }}>
-          <input data-testid="qr-manual-input" placeholder="e.g. AF-2025-1001" value={manualTag} onChange={(e) => setManualTag(e.target.value)} style={{ flex: 1, height: 42, borderRadius: 6, border: "1px solid var(--hairline)", padding: "0 12px", background: "var(--elev)", color: "var(--ink)" }} />
+          <input data-testid="qr-manual-input" placeholder="e.g. AF-2025-1001" value={manualTag} onChange={(e) => setManualTag(e.target.value)} style={{ flex: 1, minHeight: 44, borderRadius: 6, border: "1px solid var(--hairline)", padding: "0 12px", background: "var(--elev)", color: "var(--ink)" }} />
           <button className="primary-btn" data-testid="qr-lookup-button">Look up <ArrowRight size={14} /></button>
         </form>
       </div>
