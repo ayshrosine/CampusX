@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BrowserRouter, Routes, Route, NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
-import { Activity, Archive, ArrowLeft, ArrowRight, BarChart3, Bell, Box, Camera, Check, ChevronRight, ClipboardCheck, Clock3, Download, Eye, FileText, GripVertical, Hammer, LayoutDashboard, LogOut, Menu, MoreHorizontal, Moon, Package, Plus, QrCode, Search, Settings2, Shield, Sun, Trash2, User, Users, Wrench, X, Zap } from "lucide-react";
+import { Activity, Archive, ArrowLeft, ArrowRight, BarChart3, Bell, Box, Camera, Check, ChevronRight, ClipboardCheck, Clock3, Download, Eye, FileText, GripVertical, Hammer, Image as ImageIcon, LayoutDashboard, LogOut, Menu, MoreHorizontal, Moon, Package, Plus, QrCode, Search, Settings2, Shield, Sun, Trash2, Upload, User, Users, Wrench, X, Zap } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
 import { Html5Qrcode } from "html5-qrcode";
@@ -36,8 +36,24 @@ const nav = [
   { to: "/nodues", label: "No-Dues", icon: Check, perm: "nodues" },
   { to: "/reports", label: "Reports", icon: BarChart3, perm: "reports" },
   { to: "/activity", label: "Activity Logs", icon: Activity, perm: null },
+  { to: "/digest", label: "Weekly Digest", icon: FileText, perm: "admin" },
   { to: "/admin", label: "Admin Console", icon: Settings2, perm: "admin" },
 ];
+
+// Cloudinary upload helper
+async function uploadToCloudinary(file, folder) {
+  const sig = await api(`/uploads/signature?folder=${encodeURIComponent(folder)}`);
+  const form = new FormData();
+  form.append("file", file);
+  form.append("api_key", sig.api_key);
+  form.append("timestamp", sig.timestamp);
+  form.append("signature", sig.signature);
+  form.append("folder", sig.folder);
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${sig.cloud_name}/image/upload`, { method: "POST", body: form });
+  const data = await res.json();
+  if (!res.ok || !data.secure_url) throw new Error(data.error?.message || "Upload failed");
+  return { public_id: data.public_id, secure_url: data.secure_url, width: data.width, height: data.height };
+}
 
 const ROLE_PERMISSIONS = {
   Admin: new Set(["admin", "asset_write", "maintenance_write", "booking", "audit", "nodues", "reports"]),
@@ -528,7 +544,48 @@ function AssetDetail() {
   );
 }
 
-function MaintenanceCard({ x, stage, onAdvance, onSetStatus, onDelete, isDragging, dragProps }) {
+function PhotoStrip({ photos, onRemove, canDelete = true }) {
+  if (!photos || photos.length === 0) return null;
+  return (
+    <div className="photo-strip" data-testid="photo-strip">
+      {photos.map((p) => (
+        <div className="photo-thumb" key={p.public_id}>
+          <a href={p.url} target="_blank" rel="noreferrer"><img src={p.url.replace("/upload/", "/upload/w_180,h_180,c_fill,q_auto,f_auto/")} alt={p.public_id} loading="lazy" /></a>
+          {canDelete && onRemove && (
+            <button data-testid="photo-remove-button" className="photo-remove" onClick={(e) => { e.stopPropagation(); onRemove(p); }} aria-label="Remove photo"><X size={11} /></button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PhotoUploadButton({ folder, onUploaded, label = "Attach photo", testId = "photo-upload-button" }) {
+  const [busy, setBusy] = useState(false);
+  const ref = useRef(null);
+  const onPick = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { toast.error("Please pick an image"); return; }
+    if (file.size > 8 * 1024 * 1024) { toast.error("Image too large (max 8 MB)"); return; }
+    setBusy(true);
+    try {
+      const uploaded = await uploadToCloudinary(file, folder);
+      await onUploaded(uploaded);
+      toast.success("Photo uploaded");
+    } catch (err) { toast.error(err.message); } finally { setBusy(false); if (ref.current) ref.current.value = ""; }
+  };
+  return (
+    <>
+      <input ref={ref} type="file" accept="image/*" hidden onChange={onPick} data-testid={`${testId}-input`} />
+      <button type="button" className="advance-btn" data-testid={testId} disabled={busy} onClick={() => ref.current?.click()} style={{ width: "auto", marginTop: 0, padding: "6px 10px" }}>
+        {busy ? <>Uploading…</> : <><Upload size={12} /> {label}</>}
+      </button>
+    </>
+  );
+}
+
+function MaintenanceCard({ x, stage, onAdvance, onSetStatus, onDelete, onAttach, onRemovePhoto, isDragging, dragProps }) {
   const [openMenu, setOpenMenu] = useState(false);
   const stages = ["Pending", "Approved", "In progress", "Resolved"];
   const idx = stages.indexOf(stage);
@@ -541,10 +598,12 @@ function MaintenanceCard({ x, stage, onAdvance, onSetStatus, onDelete, isDraggin
       <h3>{x.description}</h3>
       <p className="muted" style={{ fontSize: 12 }}>{x.asset_id} · {x.raised_by}</p>
       <small className="mono" style={{ color: "var(--mute)", fontSize: 10 }}>{fmt(x.created_at)}</small>
-      <div style={{ display: "flex", gap: 6, marginTop: 12, position: "relative" }}>
+      <PhotoStrip photos={x.photos} onRemove={(p) => onRemovePhoto(x, p)} />
+      <div style={{ display: "flex", gap: 6, marginTop: 12, position: "relative", flexWrap: "wrap" }}>
         {stage !== "Resolved" && stage !== "Rejected" && idx < 3 && (
           <button data-testid="maintenance-advance-button" className="advance-btn" style={{ flex: 1, marginTop: 0 }} onClick={() => onAdvance(x, stages[idx + 1])}>Advance <ChevronRight size={12} /></button>
         )}
+        <PhotoUploadButton folder={`assetflow/maintenance/${x.request_id}`} onUploaded={(u) => onAttach(x, u)} label={<ImageIcon size={12} />} testId="maintenance-photo-upload" />
         <button data-testid="maintenance-menu-button" className="advance-btn" style={{ width: 32, marginTop: 0, padding: 0 }} onClick={(e) => { e.stopPropagation(); setOpenMenu((v) => !v); }} aria-label="More actions"><MoreHorizontal size={14} /></button>
         {openMenu && (
           <>
@@ -589,6 +648,19 @@ function Maintenance() {
       toast.success("Request removed"); load();
     } catch (e) { toast.error(e.message); }
   };
+  const attach = async (x, uploaded) => {
+    try {
+      await api(`/maintenance/${x.request_id}/photos`, { method: "POST", body: JSON.stringify(uploaded) });
+      load();
+    } catch (e) { toast.error(e.message); }
+  };
+  const removePhoto = async (x, p) => {
+    if (!window.confirm("Remove this photo?")) return;
+    try {
+      await api(`/maintenance/${x.request_id}/photos/${encodeURIComponent(p.public_id)}`, { method: "DELETE" });
+      toast.success("Photo removed"); load();
+    } catch (e) { toast.error(e.message); }
+  };
   const stages = ["Pending", "Approved", "In progress", "Resolved"];
   const onDragEnd = (result) => {
     if (!result.destination) return;
@@ -621,6 +693,8 @@ function Maintenance() {
                             onAdvance={setStatus}
                             onSetStatus={setStatus}
                             onDelete={remove}
+                            onAttach={attach}
+                            onRemovePhoto={removePhoto}
                             isDragging={dragSnapshot.isDragging}
                             dragProps={{ ...dragProvided.dragHandleProps }}
                           />
@@ -817,9 +891,15 @@ function Audits() {
       toast.success("Audit item saved"); load();
     } catch (e) { toast.error(e.message); }
   };
+  const attachPhoto = async (a, i, uploaded) => {
+    try {
+      await api(`/audits/${a.audit_id}/items/${i.asset_id}/photos`, { method: "POST", body: JSON.stringify(uploaded) });
+      load();
+    } catch (e) { toast.error(e.message); }
+  };
   return (
     <>
-      <PageHeader eyebrow="ACCOUNTABILITY" title="Audit cycles" description="Verify expected locations and close evidence-ready audit cycles." action={<button data-testid="audit-create-button" className="primary-btn" onClick={create}><Plus size={14} /> Open cycle</button>} />
+      <PageHeader eyebrow="ACCOUNTABILITY" title="Audit cycles" description="Verify expected locations, attach evidence photos, and close audit cycles." action={<button data-testid="audit-create-button" className="primary-btn" onClick={create}><Plus size={14} /> Open cycle</button>} />
       <div className="toolbar">
         <input data-testid="audit-department-input" value={department} onChange={(e) => setDepartment(e.target.value)} placeholder="Department" />
         <input data-testid="audit-period-input" value={period} onChange={(e) => setPeriod(e.target.value)} placeholder="Period" />
@@ -828,10 +908,14 @@ function Audits() {
         <section className="surface audit-card" key={a.audit_id}>
           <div className="section-title"><div><p className="eyebrow">{a.period} · {a.department}</p><h3>{a.audit_id}</h3></div><Status>{a.status}</Status></div>
           {a.items.slice(0, 8).map((i) => (
-            <div data-testid="audit-item-row" className="report-row" key={i.asset_id}>
-              <div><b>{i.name}</b><small>{i.tag} · expected {i.expected_location}</small></div>
-              <div className="audit-actions">{["Verified", "Missing", "Damaged"].map((s) => <button data-testid={`audit-${s.toLowerCase()}-button`} className={i.verification === s ? "selected" : ""} key={s} onClick={() => verify(a, i, s)}>{s}</button>)}</div>
-              <Status>{i.verification}</Status>
+            <div data-testid="audit-item-row" className="audit-row" key={i.asset_id}>
+              <div className="audit-row-main">
+                <div><b>{i.name}</b><small>{i.tag} · expected {i.expected_location}</small></div>
+                <div className="audit-actions">{["Verified", "Missing", "Damaged"].map((s) => <button data-testid={`audit-${s.toLowerCase()}-button`} className={i.verification === s ? "selected" : ""} key={s} onClick={() => verify(a, i, s)}>{s}</button>)}</div>
+                <Status>{i.verification}</Status>
+                <PhotoUploadButton folder={`assetflow/audits/${a.audit_id}/${i.asset_id}`} onUploaded={(u) => attachPhoto(a, i, u)} label={<><ImageIcon size={12} /> Evidence</>} testId="audit-photo-upload" />
+              </div>
+              {i.photos && i.photos.length > 0 && <PhotoStrip photos={i.photos} canDelete={false} />}
             </div>
           ))}
           {a.status === "Open" && (
@@ -988,6 +1072,7 @@ function Admin() {
           </div>
         ))}
       </section>
+      <BrandingPanel />
     </>
   );
 }
@@ -1097,6 +1182,133 @@ function ScanPage() {
 }
 
 /* ============================================================
+   Weekly Digest (admin only)
+   ============================================================ */
+function DigestPage() {
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api("/digest/weekly").then(setData).catch((e) => toast.error(e.message)); }, []);
+  const print = () => window.print();
+  const download = async (format) => {
+    setBusy(true);
+    try {
+      const res = await fetch(`${API}/reports/accreditation/download?format=${format}`, { credentials: "include" });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = `assetflow_accreditation.${format}`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  if (!data) return <div className="loading">Preparing your digest…</div>;
+  const k = data.kpis;
+  return (
+    <>
+      <PageHeader eyebrow={`WEEK OF · ${data.week_of}`} title={<>Monday <em>digest</em></>} description="A quiet Monday-morning summary of everything that needs eyes this week." action={
+        <div style={{ display: "flex", gap: 8 }}>
+          <button data-testid="digest-print" className="secondary-btn" onClick={print}><FileText size={13} /> Print</button>
+          <button data-testid="digest-download-pdf" className="primary-btn" disabled={busy} onClick={() => download("pdf")}><Download size={13} /> Export PDF</button>
+        </div>
+      } />
+      <div className="metric-grid">
+        {[
+          ["Open maintenance", k.open_maintenance, "Awaiting closure", Wrench],
+          ["Resolved this week", k.resolved_this_week, "Great work", Check],
+          ["Pending approvals", k.pending_approvals, "Awaiting your OK", Users],
+          ["Utilization", `${k.utilization}%`, "Assets in use", BarChart3],
+        ].map(([label, value, sub, Icon]) => (
+          <div className="metric" data-testid={`digest-metric-${label.toLowerCase().replaceAll(" ", "-")}`} key={label}>
+            <div className="metric-top"><span>{label}</span><Icon size={16} /></div>
+            <strong>{value}</strong><small>{sub}</small>
+          </div>
+        ))}
+      </div>
+      <div className="dashboard-grid">
+        <section className="surface">
+          <div className="section-title"><div><p className="eyebrow">WORK ORDERS</p><h3>Open maintenance</h3></div><NavLink to="/maintenance" className="link-btn">Open board <ArrowRight size={13} /></NavLink></div>
+          {data.open_maintenance.length === 0 ? <div className="empty">Nothing open right now.</div> : data.open_maintenance.map((m) => (
+            <div className="log-row" data-testid="digest-maintenance-row" key={m.request_id}>
+              <span className="activity-icon"><Wrench size={13} /></span>
+              <div style={{ flex: 1 }}><b>{m.description}</b><small>{m.asset_id} · {m.raised_by} · <Status>{m.priority}</Status></small></div>
+              <Status>{m.status}</Status>
+            </div>
+          ))}
+        </section>
+        <section className="surface">
+          <div className="section-title"><div><p className="eyebrow">APPROVALS</p><h3>Pending accounts</h3></div><NavLink to="/admin" className="link-btn">Review <ArrowRight size={13} /></NavLink></div>
+          {data.pending_users.length === 0 ? <div className="empty">No pending accounts.</div> : data.pending_users.map((u) => (
+            <div className="log-row" data-testid="digest-pending-user" key={u.user_id}>
+              <span className="activity-icon"><User size={13} /></span>
+              <div style={{ flex: 1 }}><b>{u.name}</b><small>{u.email} · currently {u.role}</small></div>
+              <Status>{u.status}</Status>
+            </div>
+          ))}
+        </section>
+      </div>
+      <section className="surface" style={{ marginTop: 16 }}>
+        <div className="section-title"><div><p className="eyebrow">CALENDAR</p><h3>Upcoming bookings</h3></div><NavLink to="/bookings" className="link-btn">View <ArrowRight size={13} /></NavLink></div>
+        {data.upcoming_bookings.length === 0 ? <div className="empty">No confirmed bookings this week.</div> : data.upcoming_bookings.map((b) => (
+          <div className="log-row" data-testid="digest-booking-row" key={b.booking_id}>
+            <span className="activity-icon"><Clock3 size={13} /></span>
+            <div style={{ flex: 1 }}><b>{b.resource_id}</b><small>{b.date} {b.start_time}–{b.end_time} · {b.requested_by}</small></div>
+            <Status>{b.status}</Status>
+          </div>
+        ))}
+      </section>
+      <section className="surface" style={{ marginTop: 16 }}>
+        <div className="section-title"><div><p className="eyebrow">AUDITS</p><h3>Open cycles</h3></div></div>
+        {data.open_audits.length === 0 ? <div className="empty">No open audits.</div> : data.open_audits.map((a) => (
+          <div className="log-row" data-testid="digest-audit-row" key={a.audit_id}>
+            <span className="activity-icon"><ClipboardCheck size={13} /></span>
+            <div style={{ flex: 1 }}><b>{a.department}</b><small>{a.period} · {a.pending_items} items pending verification</small></div>
+          </div>
+        ))}
+      </section>
+    </>
+  );
+}
+
+/* ============================================================
+   Branding editor (admin only)
+   ============================================================ */
+function BrandingPanel() {
+  const [brand, setBrand] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api("/admin/branding").then(setBrand); }, []);
+  if (!brand) return <div className="loading">Loading branding…</div>;
+  const set = (k, v) => setBrand((b) => ({ ...b, [k]: v }));
+  const save = async () => {
+    setBusy(true);
+    try {
+      const saved = await api("/admin/branding", { method: "PUT", body: JSON.stringify(brand) });
+      setBrand(saved); toast.success("Branding saved");
+    } catch (e) { toast.error(e.message); } finally { setBusy(false); }
+  };
+  const uploadLogo = async (uploaded) => set("logo_url", uploaded.secure_url);
+  return (
+    <section className="surface" data-testid="branding-panel" style={{ marginTop: 16 }}>
+      <div className="section-title"><div><p className="eyebrow">NAAC / NBA COVER SHEET</p><h3>Report branding</h3></div>
+        <button data-testid="branding-save" className="primary-btn compact" disabled={busy} onClick={save}><Check size={13} /> {busy ? "Saving…" : "Save"}</button>
+      </div>
+      <div className="branding-grid">
+        <label>Institution name<input data-testid="branding-name" value={brand.institution_name} onChange={(e) => set("institution_name", e.target.value)} /></label>
+        <label>Tagline<input data-testid="branding-tagline" value={brand.tagline} onChange={(e) => set("tagline", e.target.value)} /></label>
+        <label>Accreditation body<input data-testid="branding-body" value={brand.accreditation_body} onChange={(e) => set("accreditation_body", e.target.value)} /></label>
+        <label>Accent colour<input data-testid="branding-color" type="color" value={brand.accent_color} onChange={(e) => set("accent_color", e.target.value)} /></label>
+        <label style={{ gridColumn: "1 / -1" }}>Footer<textarea data-testid="branding-footer" value={brand.footer} onChange={(e) => set("footer", e.target.value)} rows={2} /></label>
+        <div style={{ gridColumn: "1 / -1", display: "flex", gap: 16, alignItems: "center" }}>
+          {brand.logo_url ? <img src={brand.logo_url} alt="logo" style={{ width: 64, height: 64, objectFit: "contain", borderRadius: 8, border: "1px solid var(--hairline)", background: "var(--elev)" }} /> : <div style={{ width: 64, height: 64, borderRadius: 8, background: "var(--hairline-soft)", border: "1px dashed var(--hairline)", display: "grid", placeItems: "center", color: "var(--mute)" }}><ImageIcon size={20} /></div>}
+          <div style={{ display: "grid", gap: 4 }}>
+            <PhotoUploadButton folder="assetflow/branding/logo" onUploaded={uploadLogo} label={<><Upload size={12} /> Upload logo</>} testId="branding-logo-upload" />
+            {brand.logo_url && <button data-testid="branding-logo-clear" className="advance-btn" style={{ width: "auto", marginTop: 0, padding: "6px 10px" }} onClick={() => set("logo_url", "")}><X size={12} /> Remove logo</button>}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ============================================================
    Router
    ============================================================ */
 function ProtectedApp() {
@@ -1114,6 +1326,7 @@ function ProtectedApp() {
         <Route path="/nodues" element={<NoDues />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/activity" element={<ActivityPage />} />
+        <Route path="/digest" element={<DigestPage />} />
         <Route path="/admin" element={<Admin />} />
         <Route path="/scan" element={<ScanPage />} />
         <Route path="*" element={<Dashboard />} />

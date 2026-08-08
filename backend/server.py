@@ -6,8 +6,9 @@ from pydantic import BaseModel, Field, EmailStr, field_validator
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
-import os, uuid, secrets, bcrypt, logging
+import os, uuid, secrets, bcrypt, logging, time
 from bson import ObjectId
+import cloudinary, cloudinary.utils, cloudinary.uploader
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -16,6 +17,13 @@ db = client[os.environ["DB_NAME"]]
 app = FastAPI(title="AssetFlow Campus API")
 api = APIRouter(prefix="/api")
 logger = logging.getLogger("assetflow")
+
+cloudinary.config(
+    cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME"),
+    api_key=os.environ.get("CLOUDINARY_API_KEY"),
+    api_secret=os.environ.get("CLOUDINARY_API_SECRET"),
+    secure=True,
+)
 
 class Signup(BaseModel):
     name: str
@@ -454,18 +462,41 @@ async def accreditation_download(format: str = "csv", user=Depends(require_permi
     if format == "pdf":
         from reportlab.lib.pagesizes import A4
         from reportlab.lib import colors
-        from reportlab.lib.styles import getSampleStyleSheet
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-        buf = io.BytesIO(); doc = SimpleDocTemplate(buf, pagesize=A4, title="AssetFlow Accreditation")
-        styles = getSampleStyleSheet(); story = []
-        story.append(Paragraph("AssetFlow Campus", styles["Title"]))
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak
+        import urllib.request, tempfile
+        brand = {**BRANDING_DEFAULT, **{k: v for k, v in ((await db.branding.find_one({"_id": "singleton"})) or {}).items() if k != "_id"}}
+        try: accent = colors.HexColor(brand.get("accent_color") or "#171717")
+        except Exception: accent = colors.HexColor("#171717")
+        buf = io.BytesIO(); doc = SimpleDocTemplate(buf, pagesize=A4, title=f"{brand['institution_name']} · Accreditation")
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle("cover_title", parent=styles["Title"], textColor=accent, fontSize=30, leading=34, spaceAfter=8)
+        eyebrow_style = ParagraphStyle("cover_eyebrow", parent=styles["Normal"], textColor=colors.HexColor("#8f8f8f"), fontSize=10, spaceAfter=6)
+        subtitle_style = ParagraphStyle("cover_subtitle", parent=styles["Heading2"], textColor=colors.HexColor("#171717"), fontSize=16, leading=20, spaceAfter=20)
+        story = []
+        logo_url = brand.get("logo_url") or ""
+        if logo_url.startswith("https://"):
+            try:
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".img")
+                with urllib.request.urlopen(logo_url, timeout=5) as r: tmp.write(r.read())
+                tmp.close()
+                story.append(Image(tmp.name, width=42*mm, height=42*mm, kind="proportional"))
+                story.append(Spacer(1, 12))
+            except Exception as _e: pass
+        story.append(Paragraph(brand.get("accreditation_body") or "NAAC / NBA", eyebrow_style))
+        story.append(Paragraph(brand.get("institution_name") or "AssetFlow Campus", title_style))
+        if brand.get("tagline"): story.append(Paragraph(brand["tagline"], subtitle_style))
+        story.append(Spacer(1, 30))
         story.append(Paragraph("Accreditation Evidence Report", styles["Heading2"]))
         story.append(Paragraph(f"Generated {generated} · Prepared by {user.get('name','')}", styles["Normal"]))
-        story.append(Spacer(1, 18))
+        story.append(PageBreak())
+        story.append(Paragraph("Metrics summary", styles["Heading2"]))
+        story.append(Spacer(1, 12))
         data = [[str(a), str(b)] for a, b in rows if a or b]
         table = Table(data, colWidths=[280, 200])
         table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#171717")),
+            ("BACKGROUND", (0, 0), (-1, 0), accent),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, -1), 10),
@@ -474,8 +505,9 @@ async def accreditation_download(format: str = "csv", user=Depends(require_permi
             ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#ebebeb")),
         ]))
         story.append(table)
-        story.append(Spacer(1, 20))
-        story.append(Paragraph("This report is a machine-generated snapshot for accreditation review (NAAC / NBA). All figures are drawn from AssetFlow Campus activity logs and can be re-verified from the workspace.", styles["Italic"]))
+        story.append(Spacer(1, 24))
+        footer_text = brand.get("footer") or BRANDING_DEFAULT["footer"]
+        story.append(Paragraph(footer_text, styles["Italic"]))
         doc.build(story); buf.seek(0)
         await log_event(user, "accreditation report downloaded", "report", "accreditation", metadata={"format": "pdf"})
         return StreamingResponse(iter([buf.getvalue()]), media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="assetflow_accreditation.pdf"'})
@@ -527,6 +559,111 @@ async def asset_by_tag(tag: str, user=Depends(current_user)):
     asset = await db.assets.find_one({"tag": tag}, {"_id": 0})
     if not asset: raise HTTPException(404, "No asset with this tag")
     return clean(asset)
+
+# --- Cloudinary photo attachments ---
+ALLOWED_UPLOAD_FOLDERS = ("assetflow/maintenance/", "assetflow/audits/", "assetflow/branding/")
+
+@api.get("/uploads/signature")
+async def cloudinary_signature(folder: str, user=Depends(current_user)):
+    if not folder.startswith(ALLOWED_UPLOAD_FOLDERS):
+        raise HTTPException(400, "Invalid folder path")
+    if folder.startswith("assetflow/branding/") and user.get("role") != "Admin":
+        raise HTTPException(403, "Only admins can upload branding assets")
+    ts = int(time.time())
+    params = {"timestamp": ts, "folder": folder}
+    signature = cloudinary.utils.api_sign_request(params, os.environ.get("CLOUDINARY_API_SECRET"))
+    return {"signature": signature, "timestamp": ts, "cloud_name": os.environ.get("CLOUDINARY_CLOUD_NAME"), "api_key": os.environ.get("CLOUDINARY_API_KEY"), "folder": folder}
+
+class PhotoAttach(BaseModel):
+    public_id: str = Field(min_length=3, max_length=200)
+    secure_url: str = Field(min_length=10, max_length=500)
+    width: Optional[int] = None
+    height: Optional[int] = None
+
+@api.post("/maintenance/{request_id}/photos")
+async def add_maintenance_photo(request_id: str, payload: PhotoAttach, user=Depends(require_permission("maintenance_write"))):
+    doc = await db.maintenance.find_one({"request_id": request_id}, {"_id": 0})
+    if not doc: raise HTTPException(404, "Request not found")
+    if not payload.secure_url.startswith("https://res.cloudinary.com/"): raise HTTPException(400, "Only Cloudinary URLs allowed")
+    photo = {"public_id": payload.public_id, "url": payload.secure_url, "width": payload.width, "height": payload.height, "uploaded_by": user.get("name"), "uploaded_at": now_iso()}
+    await db.maintenance.update_one({"request_id": request_id}, {"$push": {"photos": photo}})
+    await log_event(user, "maintenance photo attached", "maintenance", request_id, metadata={"public_id": payload.public_id})
+    return {"ok": True, "photo": photo}
+
+@api.delete("/maintenance/{request_id}/photos/{public_id:path}")
+async def remove_maintenance_photo(request_id: str, public_id: str, user=Depends(require_permission("maintenance_write"))):
+    doc = await db.maintenance.find_one({"request_id": request_id}, {"_id": 0})
+    if not doc: raise HTTPException(404, "Request not found")
+    if user.get("role") not in {"Admin", "Asset Manager", "HOD"} and doc.get("raised_by_id") != user.get("user_id"):
+        raise HTTPException(403, "Cannot delete another user's photo")
+    try: cloudinary.uploader.destroy(public_id, invalidate=True)
+    except Exception as e: logger.warning(f"Cloudinary destroy failed for {public_id}: {e}")
+    await db.maintenance.update_one({"request_id": request_id}, {"$pull": {"photos": {"public_id": public_id}}})
+    await log_event(user, "maintenance photo removed", "maintenance", request_id, metadata={"public_id": public_id})
+    return {"ok": True}
+
+@api.post("/audits/{audit_id}/items/{asset_id}/photos")
+async def add_audit_photo(audit_id: str, asset_id: str, payload: PhotoAttach, user=Depends(require_permission("audit"))):
+    doc = await db.audits.find_one({"audit_id": audit_id, "items.asset_id": asset_id}, {"_id": 0})
+    if not doc: raise HTTPException(404, "Audit item not found")
+    if not payload.secure_url.startswith("https://res.cloudinary.com/"): raise HTTPException(400, "Only Cloudinary URLs allowed")
+    photo = {"public_id": payload.public_id, "url": payload.secure_url, "uploaded_by": user.get("name"), "uploaded_at": now_iso()}
+    await db.audits.update_one({"audit_id": audit_id, "items.asset_id": asset_id}, {"$push": {"items.$.photos": photo}})
+    await log_event(user, "audit photo attached", "audit", audit_id, metadata={"asset_id": asset_id, "public_id": payload.public_id})
+    return {"ok": True, "photo": photo}
+
+# --- Weekly digest ---
+@api.get("/digest/weekly")
+async def weekly_digest(user=Depends(require_permission("admin"))):
+    now = datetime.now(timezone.utc)
+    week_ago = (now - timedelta(days=7)).isoformat()
+    upcoming_end = (now.date() + timedelta(days=7)).isoformat()
+    today_iso = now.date().isoformat()
+    open_maintenance = await db.maintenance.find({"status": {"$nin": ["Resolved", "Rejected"]}}, {"_id": 0}).sort("priority", -1).to_list(50)
+    resolved_this_week = await db.maintenance.count_documents({"status": "Resolved", "resolved_at": {"$gte": week_ago}})
+    pending_users = await db.users.find({"status": "Pending"}, {"_id": 0, "password_hash": 0}).to_list(50)
+    upcoming_bookings = await db.bookings.find({"date": {"$gte": today_iso, "$lte": upcoming_end}, "status": "Confirmed"}, {"_id": 0}).sort([("date", 1), ("start_time", 1)]).to_list(50)
+    open_audits = await db.audits.find({"status": "Open"}, {"_id": 0}).to_list(50)
+    assets_total = await db.assets.count_documents({})
+    allocated = await db.assets.count_documents({"status": "Allocated"})
+    utilization = round((allocated / assets_total) * 100) if assets_total else 0
+    events_this_week = await db.activity.count_documents({"timestamp": {"$gte": week_ago}})
+    return {
+        "generated_at": now.isoformat(),
+        "week_of": (now.date() - timedelta(days=now.weekday())).isoformat(),
+        "kpis": {"open_maintenance": len(open_maintenance), "resolved_this_week": resolved_this_week, "pending_approvals": len(pending_users), "upcoming_bookings": len(upcoming_bookings), "open_audits": len(open_audits), "utilization": utilization, "activity_events": events_this_week},
+        "open_maintenance": [clean(m) for m in open_maintenance[:10]],
+        "pending_users": [clean(u) for u in pending_users[:10]],
+        "upcoming_bookings": [clean(b) for b in upcoming_bookings[:10]],
+        "open_audits": [{"audit_id": a["audit_id"], "department": a["department"], "period": a["period"], "pending_items": sum(1 for i in a.get("items", []) if i.get("verification") == "Pending")} for a in open_audits[:10]],
+    }
+
+# --- NAAC branding / cover sheet ---
+class BrandingUpdate(BaseModel):
+    institution_name: str = Field(min_length=2, max_length=140)
+    tagline: str = Field(default="", max_length=180)
+    accreditation_body: str = Field(default="NAAC / NBA", max_length=80)
+    footer: str = Field(default="", max_length=240)
+    accent_color: str = Field(default="#171717", pattern=r"^#[0-9a-fA-F]{6}$")
+    logo_url: str = Field(default="", max_length=500)
+
+    @field_validator("institution_name", "tagline", "accreditation_body", "footer", "logo_url")
+    @classmethod
+    def _strip(cls, v: str) -> str: return (v or "").strip()
+
+BRANDING_DEFAULT = {"institution_name": "AssetFlow Campus", "tagline": "Every asset. Accountable.", "accreditation_body": "NAAC / NBA", "footer": "This report is a machine-generated snapshot for accreditation review. Figures are drawn from AssetFlow Campus activity logs and can be re-verified from the workspace.", "accent_color": "#171717", "logo_url": ""}
+
+@api.get("/admin/branding")
+async def get_branding(user=Depends(current_user)):
+    doc = await db.branding.find_one({"_id": "singleton"}) or {}
+    return {**BRANDING_DEFAULT, **{k: v for k, v in doc.items() if k != "_id"}}
+
+@api.put("/admin/branding")
+async def update_branding(payload: BrandingUpdate, user=Depends(require_permission("admin"))):
+    data = payload.model_dump()
+    await db.branding.update_one({"_id": "singleton"}, {"$set": {**data, "updated_at": now_iso(), "updated_by": user["name"]}}, upsert=True)
+    await log_event(user, "branding updated", "branding", "singleton", after=data)
+    return {**BRANDING_DEFAULT, **data}
 
 async def seed():
     if await db.assets.count_documents({}): return
