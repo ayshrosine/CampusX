@@ -1,70 +1,142 @@
-# Getting Started with Create React App
+# AssetFlow Campus — Frontend
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A responsive React single-page application (SPA) that adapts fluidly from mobile
+phones to desktop. It talks to the FastAPI backend over a cookie-authenticated
+JSON API and enforces the same roles the backend enforces (UI-level gating on top
+of server-level RBAC).
 
-## Available Scripts
+---
 
-In the project directory, you can run:
+## 1. Tech Stack
 
-### `npm start`
+| Concern            | Library / Tool |
+|--------------------|----------------|
+| Framework          | **React 19** |
+| Build / tooling    | **Create React App + CRACO** (`craco start/build`) |
+| Routing            | **react-router-dom 7** |
+| Styling            | **Tailwind CSS** + `tailwind-merge`, `tailwindcss-animate`, `clsx`, `class-variance-authority` |
+| UI components      | **shadcn/ui** (Radix UI primitives) in `src/components/ui` |
+| Animation          | **Framer Motion** |
+| Charts             | **Recharts** (dashboard/digest KPIs) |
+| Drag & drop        | **@hello-pangea/dnd** (Trello-style maintenance Kanban) |
+| QR                 | **html5-qrcode** (scanner) + **qrcode.react** (asset QR codes) |
+| Notifications/UI   | **Sonner** (toasts), Web Push subscription via service worker |
+| Theming            | **next-themes** (light/dark) |
+| HTTP / data        | **axios** (with `withCredentials`), SWR / React Query available |
+| Forms/validation   | **react-hook-form** + **zod** |
+| Icons              | **lucide-react** |
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+> **Responsive design:** layouts use fluid grids, `%` / viewport units and Tailwind
+> breakpoints (`sm md lg xl`) to rearrange, shrink and hide components per screen
+> size. Touch targets are ≥44px; the `/scan` page ships PWA meta tags so custodians
+> can add it to their home screen.
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+---
 
-### `npm test`
+## 2. Project Structure
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+```
+frontend/
+├── craco.config.js        # CRA override (aliases, tailwind)
+├── tailwind.config.js
+├── public/                # index.html (PWA meta), service worker, icons
+└── src/
+    ├── index.js           # React root, providers
+    ├── App.js             # ⭐ ALL pages, routing, Shell layout, API client
+    ├── App.css / index.css
+    ├── components/ui/      # shadcn/ui library (button, dialog, table, tabs, …)
+    ├── hooks/use-toast.js
+    ├── lib/utils.js        # cn() classnames helper
+    └── constants/testIds/  # stable data-testid selectors for tests
+```
 
-### `npm run build`
+> The app is intentionally consolidated in **`src/App.js`**: each page is a function
+> component defined in that file, wrapped by a shared `Shell` (sidebar + top bar +
+> notification bell) and guarded by `ProtectedApp`.
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+---
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## 3. Routing & Pages
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+All authenticated routes render inside `Shell`. Unauthenticated users are sent to
+`/login`.
 
-### `npm run eject`
+| Route                     | Component      | Purpose |
+|---------------------------|----------------|---------|
+| `/login`                  | `Login`        | Email/password + "Continue with Google" (Emergent-managed OAuth) |
+| `/dashboard`              | `Dashboard`    | KPI cards + live activity feed |
+| `/inventory`              | `Inventory`    | Asset register: search, status/category filters |
+| `/inventory/:asset_id`    | `AssetDetail`  | Asset details, QR code, check-out / check-in |
+| `/bookings`               | `Bookings`     | Reserve bookable assets |
+| `/maintenance`            | `Maintenance`  | Kanban board (drag & drop) + Advance dropdown + photos |
+| `/audits`                 | `Audits`       | Audit runs, item conditions, evidence photos, close→PDF |
+| `/nodues`                 | `NoDues`       | Student clearance by department |
+| `/reports`                | `Reports`      | Operational + NAAC/NBA accreditation export (PDF/CSV) |
+| `/activity`               | `ActivityPage` | Full audit log |
+| `/digest`                 | `DigestPage`   | Admin weekly digest (Print / PDF) |
+| `/admin`                  | `Admin`        | Departments, categories, users/roles, delegations, imports, branding, role-preview |
+| `/scan`                   | `ScanPage`     | Mobile QR scan → check-out / check-in |
+| `*`                       | `Dashboard`    | Fallback |
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+### How the pages connect
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+```
+index.js
+  └── App (theme + toaster providers)
+        └── ProtectedApp        # calls GET /api/auth/me on load
+              ├── (no session) → <Login/>
+              └── (session)    → <Shell user=…>
+                                    ├── Sidebar nav (role-filtered links)
+                                    ├── NotificationBell (feed + push)
+                                    └── <Routes> … page components …
+```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+- **`ProtectedApp`** bootstraps auth: it requests `GET /api/auth/me`. On success it
+  stores the `user` (name, role, department) and renders the shell; on 401 it shows `Login`.
+- **`Shell`** receives `user` and shows only the nav links the role is allowed to
+  see, plus the logout action and the notification bell.
+- **Role gating** in the UI mirrors backend `ROLE_PERMISSIONS`; the backend remains
+  the source of truth (any blocked API call returns 403).
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+---
 
-## Learn More
+## 4. API Client & Auth Flow
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+- Base URL: **`process.env.REACT_APP_BACKEND_URL` + `/api`** (never hardcoded).
+- All requests use **`withCredentials: true`** so the httpOnly `session_token`
+  cookie is sent automatically.
+- **Email/password:** `POST /api/auth/login` → sets cookie → app reloads user.
+- **Google:** redirects to Emergent-managed auth, returns with a session id which is
+  exchanged via `POST /api/auth/session` (sets the same cookie). New Google users
+  start as Student/Pending.
+- **Logout:** `POST /api/auth/logout` clears the cookie.
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+---
 
-### Code Splitting
+## 5. Feature Notes
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+- **Maintenance Kanban** — columns are drag-and-drop (`@hello-pangea/dnd`). Each card
+  has an **Advance** dropdown: *Move to next stage / Move to Resolved / Reject / Delete*.
+  Resolved cards are auto-purged 30 days after resolution (enforced backend-side).
+  Photos upload directly to Cloudinary using a signature fetched from the backend.
+- **Scan** — `html5-qrcode` reads an asset tag, looks it up via
+  `GET /api/assets/by-tag/{tag}`, then checks the asset out/in. Optimised for
+  one-handed mobile use.
+- **Reports / Digest** — call the backend PDF/CSV endpoints and stream the file to the
+  browser for download or print.
+- **Push notifications** — the app fetches the VAPID public key, subscribes via the
+  service worker, and posts the subscription to `POST /api/push/subscribe`.
 
-### Analyzing the Bundle Size
+---
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+## 6. Run / Build
 
-### Making a Progressive Web App
+```bash
+yarn install
+# Dev server is managed by supervisor on port 3000:
+sudo supervisorctl restart frontend
+# Production build:
+yarn build
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+Lint: `eslint` via CRACO config. Do not change `.env` URLs/ports.
