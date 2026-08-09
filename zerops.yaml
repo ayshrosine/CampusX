@@ -1,57 +1,35 @@
-#zeropsPreprocessor=on
+zerops:
+  - setup: backend
+    build:
+      base: python@3.11
+      buildCommands:
+        - pip install -r backend/requirements.txt
+      deployFiles:
+        - backend
+    run:
+      base: python@3.11
+      os: ubuntu
+      ports:
+        - port: 8001
+          httpSupport: true
+      envVariables:
+        DB_NAME: assetflow_campus
+        VAPID_SUBJECT: mailto:admin@assetflow.edu
+        CORS_ORIGINS: ${frontend_zeropsSubdomain}
+      start: cd backend && uvicorn server:app --host 0.0.0.0 --port 8001
 
-# Secret variables - these will be set in Zerops dashboard
-MONGO_URL=mongodb+srv://username:password@cluster.mongodb.net/assetflow_campus
-CLOUDINARY_CLOUD_NAME=your_cloud_name
-CLOUDINARY_API_KEY=your_api_key
-CLOUDINARY_API_SECRET=your_api_secret
-VAPID_PRIVATE_KEY=your_vapid_private_key
-VAPID_PUBLIC_KEY=your_vapid_public_key
-
-# Backend service configuration
-- name: backend
-  type: python
-  version: "3.11"
-  env:
-    PYTHON_ENV=production
-    MONGO_URL=${MONGO_URL}
-    DB_NAME=assetflow_campus
-    CORS_ORIGINS=*
-    CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
-    CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
-    CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
-    VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
-    VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
-    VAPID_SUBJECT=mailto:admin@assetflow.edu
-  build:
-    base: backend
-    buildCommand: pip install -r requirements.txt
-  run:
-    command: uvicorn server:app --host 0.0.0.0 --port 8001
-    port: 8001
-  horizontal:
-    min: 1
-    max: 3
-    start: 1
-    cpuLimit: 0.5
-    memoryLimit: 512
-
-# Frontend service configuration
-- name: frontend
-  type: nodejs
-  version: "20"
-  env:
-    NODE_ENV=production
-    REACT_APP_BACKEND_URL=${backend_hostname}
-  build:
-    base: frontend
-    buildCommand: yarn install && yarn build
-  run:
-    command: npx serve -s build -l 3000
-    port: 3000
-  horizontal:
-    min: 1
-    max: 3
-    start: 1
-    cpuLimit: 0.5
-    memoryLimit: 512
+  - setup: frontend
+    build:
+      base: nodejs@20
+      buildCommands:
+        - cd frontend && yarn install && yarn build
+      deployFiles:
+        - frontend/build
+    run:
+      base: nodejs@20
+      ports:
+        - port: 3000
+          httpSupport: true
+      envVariables:
+        REACT_APP_BACKEND_URL: ${backend_zeropsSubdomain}
+      start: npx serve -s . -l 3000
