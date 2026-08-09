@@ -24,7 +24,7 @@ zerops:
       buildCommands:
         - cd frontend && yarn install && yarn build
       deployFiles:
-        - frontend/build
+        - frontend/build/~
     run:
       base: nodejs@20
       ports:
