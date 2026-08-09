@@ -20,6 +20,8 @@ zerops:
         DB_NAME: assetflow_campus
         VAPID_SUBJECT: mailto:admin@assetflow.edu
         CORS_ORIGINS: ${frontend_zeropsSubdomain}
+        GOOGLE_CLIENT_ID: 303299367578-drvv2qdvav274mud7cmidnm5q7bas5i0.apps.googleusercontent.com
+        GOOGLE_CLIENT_SECRET: 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
       start: cd backend && python3 -m uvicorn server:app --host 0.0.0.0 --port 8001
 
   - setup: frontend
@@ -27,6 +29,7 @@ zerops:
       base: nodejs@20
       envVariables:
         REACT_APP_BACKEND_URL: ${backend_zeropsSubdomain}
+        REACT_APP_GOOGLE_CLIENT_ID: 303299367578-drvv2qdvav274mud7cmidnm5q7bas5i0.apps.googleusercontent.com
       buildCommands:
         - cd frontend && yarn install && yarn build
       deployFiles:
