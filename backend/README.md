@@ -7,6 +7,23 @@ Cloudinary (uploads), ReportLab (PDF), and Web Push (VAPID).
 
 ---
 
+## 📋 Table of Contents
+
+- [Architecture Overview](#architecture-overview)
+- [Authentication](#authentication)
+- [Roles & Permissions (RBAC)](#roles--permissions-rbac)
+- [API Endpoints](#api-endpoints)
+- [Data Model](#data-model)
+- [Local Development Setup](#local-development-setup)
+- [External Services Configuration](#external-services-configuration)
+- [Environment Variables](#environment-variables)
+- [Integrations](#integrations)
+- [Testing](#testing)
+- [Deployment](#deployment)
+- [Troubleshooting](#troubleshooting)
+
+---
+
 ## 1. Architecture Overview
 
 ```
@@ -172,7 +189,148 @@ All under `/api`. "Perm" is the permission checked (blank = any authenticated us
 
 ---
 
-## 6. Integrations
+## 6. Local Development Setup
+
+### Prerequisites
+
+- **Python 3.11** - [Download here](https://www.python.org/downloads/)
+- **MongoDB** (local or MongoDB Atlas account)
+- **pip** (Python package manager)
+
+### Step-by-Step Setup
+
+1. **Navigate to the backend directory:**
+   ```bash
+   cd backend
+   ```
+
+2. **Create a virtual environment (recommended):**
+   ```bash
+   python -m venv venv
+   # On Windows:
+   venv\Scripts\activate
+   # On macOS/Linux:
+   source venv/bin/activate
+   ```
+
+3. **Install Python dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Configure environment variables:**
+   Create a `.env` file by copying the example file:
+   ```bash
+   cp .env.example .env
+   ```
+   Then edit `.env` with your actual credentials (see [Environment Variables](#environment-variables) section)
+
+5. **Start the development server:**
+   ```bash
+   uvicorn server:app --reload --host 0.0.0.0 --port 8001
+   ```
+
+6. **Verify the server is running:**
+   ```bash
+   curl http://localhost:8001/api/
+   ```
+
+The backend will be available at `http://localhost:8001` with the API prefixed by `/api`.
+
+### Development Tools
+
+**Code Formatting:**
+```bash
+# Format code with Black
+black server.py
+
+# Sort imports with isort
+isort server.py
+```
+
+**Linting:**
+```bash
+# Lint with flake8
+flake8 server.py
+
+# Type checking with mypy
+mypy server.py
+```
+
+---
+
+## 7. External Services Configuration
+
+The backend requires several external services to function properly:
+
+### MongoDB Atlas
+
+1. **Create a MongoDB Atlas account** at [https://www.mongodb.com/cloud/atlas](https://www.mongodb.com/cloud/atlas)
+2. **Create a cluster** (free tier available)
+3. **Configure network access** - add your IP to the IP whitelist
+4. **Create a database user** with read/write permissions
+5. **Get the connection string** from the Connect dialog
+6. **Update your `.env` file** with the connection string
+
+### Cloudinary
+
+1. **Create a Cloudinary account** at [https://cloudinary.com/](https://cloudinary.com/)
+2. **Navigate to the Dashboard** to get your credentials:
+   - Cloud Name
+   - API Key
+   - API Secret
+3. **Configure upload settings** (optional) in the Cloudinary console
+4. **Update your `.env` file** with the Cloudinary credentials
+
+### Web Push (VAPID)
+
+1. **Generate VAPID keys** using:
+   ```bash
+   npx web-push generate-vapid-keys
+   ```
+   Or use the online generator: [https://web-push-codelab.glitch.me/](https://web-push-codelab.glitch.me/)
+
+2. **Update your `.env` file** with the VAPID keys
+
+### Google OAuth (via Emergent)
+
+1. **Create a Google Cloud Project** at [https://console.cloud.google.com/](https://console.cloud.google.com/)
+2. **Enable the Google+ API**
+3. **Configure OAuth consent screen**
+4. **Create OAuth 2.0 credentials**
+5. **Configure with Emergent service** to manage the OAuth flow
+
+---
+
+## 8. Environment Variables
+
+Create a `.env` file in the backend directory by copying the example file:
+```bash
+cp .env.example .env
+```
+Then edit `.env` with your actual credentials. The example file contains all the required variables with placeholder values.
+
+**Required Variables:**
+- `MONGO_URL` - MongoDB Atlas connection string
+- `DB_NAME` - Database name
+- `CLOUDINARY_CLOUD_NAME` - Cloudinary cloud name
+- `CLOUDINARY_API_KEY` - Cloudinary API key
+- `CLOUDINARY_API_SECRET` - Cloudinary API secret
+- `VAPID_PUBLIC_KEY` - VAPID public key for push notifications
+- `VAPID_PRIVATE_KEY` - VAPID private key for push notifications
+- `VAPID_SUBJECT` - VAPID subject (email)
+- `GOOGLE_CLIENT_ID` - Google OAuth client ID
+- `GOOGLE_CLIENT_SECRET` - Google OAuth client secret
+
+**Important Notes:**
+- Never commit the `.env` file to version control
+- Use strong, unique passwords for MongoDB
+- Keep API secrets secure and rotate them regularly
+- In production, use environment-specific configurations
+
+---
+
+## 9. Integrations
 
 - **Cloudinary** — the client requests a short-lived upload **signature** from
   `GET /api/uploads/signature`, uploads the file directly to Cloudinary, then posts
@@ -186,24 +344,188 @@ All under `/api`. "Perm" is the permission checked (blank = any authenticated us
 
 ---
 
-## 7. Environment & Run
+## 10. Testing
 
-`backend/.env`:
-```
-MONGO_URL=<atlas connection string>
-DB_NAME=assetflow_campus
-CORS_ORIGINS=*
-CLOUDINARY_CLOUD_NAME= / CLOUDINARY_API_KEY= / CLOUDINARY_API_SECRET=
-VAPID_PUBLIC_KEY= / VAPID_PRIVATE_KEY= / VAPID_SUBJECT=
-```
+### Running Tests
 
 ```bash
-pip install -r requirements.txt
-sudo supervisorctl restart backend      # runs uvicorn on 0.0.0.0:8001
-tail -n 50 /var/log/supervisor/backend.err.log
+# Run all tests
+pytest
+
+# Run with coverage
+pytest --cov=server
+
+# Run specific test file
+pytest tests/test_specific.py
+
+# Run with verbose output
+pytest -v
 ```
 
-- **Seeding:** an idempotent `seed()` runs on startup — creates demo admin/manager,
-  sample assets, departments, categories and no-dues if missing.
-- **Key libraries:** `fastapi`, `motor`, `pydantic`, `bcrypt`, `cloudinary`,
-  `reportlab`, `pywebpush`, `requests`, `python-dotenv` (see `requirements.txt`).
+### Test Structure
+
+- **Unit tests**: Test individual functions and components
+- **Integration tests**: Test API endpoints and database interactions
+- **Authentication tests**: Verify session management and RBAC
+
+### Test Files
+
+- `tests/test_assetflow_api.py` - Main backend test suite
+- `tests/test_new_features.py` - Tests for new features
+
+### Key Dependencies
+
+- `pytest` - Testing framework
+- `pytest-xdist` - Parallel test execution
+- `pytest-cov` - Coverage reporting
+
+---
+
+## 11. Deployment
+
+### Production Deployment
+
+The backend is designed to run in production environments using:
+
+1. **Supervisor** (recommended for production)
+2. **Kubernetes** (for containerized deployments)
+3. **Docker** (for containerization)
+
+### Supervisor Configuration
+
+Example supervisor configuration:
+
+```ini
+[program:backend]
+command=/path/to/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8001
+directory=/path/to/backend
+user=www-data
+autostart=true
+autorestart=true
+redirect_stderr=true
+stdout_logfile=/var/log/supervisor/backend.log
+environment=ENV_VAR="value"
+```
+
+**Commands:**
+```bash
+# Restart backend service
+sudo supervisorctl restart backend
+
+# Check status
+sudo supervisorctl status backend
+
+# View logs
+tail -f /var/log/supervisor/backend.log
+```
+
+### Docker Deployment
+
+Create a `Dockerfile`:
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8001"]
+```
+
+**Build and run:**
+```bash
+docker build -t assetflow-backend .
+docker run -p 8001:8001 --env-file .env assetflow-backend
+```
+
+### Environment-Specific Considerations
+
+- **Production**: Use production MongoDB Atlas cluster, secure API keys, enable HTTPS
+- **Staging**: Use staging environment for testing before production deployment
+- **Development**: Use local MongoDB or development Atlas cluster
+
+---
+
+## 12. Troubleshooting
+
+### Common Issues
+
+**Connection to MongoDB failed:**
+- Verify `MONGO_URL` is correct in `.env`
+- Check MongoDB Atlas IP whitelist includes your server IP
+- Ensure database user has correct permissions
+- Check network connectivity to MongoDB Atlas
+
+**Cloudinary upload errors:**
+- Verify Cloudinary credentials are correct
+- Check Cloudinary account status and limits
+- Ensure upload presets are properly configured
+- Check file size limits and supported formats
+
+**Push notifications not working:**
+- Verify VAPID keys are correctly configured
+- Check browser supports Web Push API
+- Ensure service worker is properly registered
+- Check push subscription is valid
+
+**Authentication failures:**
+- Verify session cookie is being sent
+- Check session expiration settings
+- Ensure `current_user` dependency is working
+- Verify RBAC permissions are correctly configured
+
+**PDF generation errors:**
+- Check ReportLab installation
+- Verify font availability
+- Check branding configuration
+- Ensure sufficient memory for PDF generation
+
+### Debug Mode
+
+Enable debug mode for detailed error messages:
+
+```bash
+uvicorn server:app --reload --host 0.0.0.0 --port 8001 --log-level debug
+```
+
+### Log Files
+
+- **Supervisor logs**: `/var/log/supervisor/backend.log`
+- **Application logs**: Configure logging in `server.py`
+- **Error logs**: Check both application and supervisor logs
+
+---
+
+## Key Dependencies
+
+The backend uses the following key libraries (see `requirements.txt` for full list):
+
+- `fastapi` - Modern web framework for building APIs
+- `uvicorn` - ASGI server for running FastAPI
+- `motor` - Async MongoDB driver
+- `pydantic` - Data validation and settings management
+- `bcrypt` - Password hashing
+- `cloudinary` - Cloud image and video management
+- `reportlab` - PDF generation
+- `pywebpush` - Web Push notification support
+- `python-dotenv` - Environment variable management
+- `google-auth` - Google OAuth authentication
+- `requests` - HTTP library for making requests
+
+---
+
+## Seeding
+
+An idempotent `seed()` function runs on backend startup that:
+
+- Creates demo admin and asset manager accounts
+- Sets up sample departments and categories
+- Creates sample assets for testing
+- Initializes no-dues clearance data
+- Configures default branding settings
+
+The seed function only creates data if it doesn't already exist, making it safe to run multiple times.

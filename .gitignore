@@ -18,6 +18,8 @@ node_modules/
 
 # Testing
 /coverage
+test_reports/
+tests/
 
 # Next.js
 /.next/
@@ -31,7 +33,11 @@ dist/
 dist
 
 # Environment files (comprehensive coverage)
-
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 *token.json*
 *credentials.json*
 
@@ -45,18 +51,24 @@ dump.rdb
 # System files
 .DS_Store
 *.pem
+Thumbs.db
 
 # Python
 __pycache__/
 *pyc*
 venv/
 .venv/
+*.pyc
+*.pyo
+*.pyd
+.Python
 
 # Development tools
 chainlit.md
 .chainlit
 .ipynb_checkpoints/
 .ac
+.emergent/
 
 # Deployment
 .vercel
@@ -81,3 +93,13 @@ memory/test_credentials.md
 # Mobile development
 android-sdk/frontend/node_modules/.cache/default-development/0.pack
 frontend/node_modules/.cache/default-development/0.pack
+
+# Test files in root directory
+*_test.py
+test_result.md
+backend_test*.py
+
+# Lock files (use package-lock.json or yarn.lock consistently)
+# Remove the one you don't use
+# yarn.lock
+# package-lock.json
