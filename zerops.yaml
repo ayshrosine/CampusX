@@ -25,6 +25,8 @@ zerops:
   - setup: frontend
     build:
       base: nodejs@20
+      envVariables:
+        REACT_APP_BACKEND_URL: ${backend_zeropsSubdomain}
       buildCommands:
         - cd frontend && yarn install && yarn build
       deployFiles:
@@ -34,6 +36,4 @@ zerops:
       ports:
         - port: 3000
           httpSupport: true
-      envVariables:
-        REACT_APP_BACKEND_URL: ${backend_zeropsSubdomain}
       start: npx serve -s . -l 3000
