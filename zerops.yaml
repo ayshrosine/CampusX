@@ -6,9 +6,13 @@ zerops:
         - pip install -r backend/requirements.txt
       deployFiles:
         - backend
+      addToRunPrepare:
+        - backend/requirements.txt
     run:
       base: python@3.11
       os: ubuntu
+      prepareCommands:
+        - pip install -r backend/requirements.txt
       ports:
         - port: 8001
           httpSupport: true
@@ -16,7 +20,7 @@ zerops:
         DB_NAME: assetflow_campus
         VAPID_SUBJECT: mailto:admin@assetflow.edu
         CORS_ORIGINS: ${frontend_zeropsSubdomain}
-      start: cd backend && uvicorn server:app --host 0.0.0.0 --port 8001
+      start: cd backend && python3 -m uvicorn server:app --host 0.0.0.0 --port 8001
 
   - setup: frontend
     build:
