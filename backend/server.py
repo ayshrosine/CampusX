@@ -296,7 +296,7 @@ async def oauth_session(request: Request, response: Response):
                 await log_event(user, "account created with Google", "user", user["user_id"], after={"email": user["email"], "role": user["role"]})
             
             session_token = await create_session(user["user_id"])
-            return session_response(Response(content=__import__("json").dumps({k:v for k,v in user.items() if k != "password_hash"}), media_type="application/json"), session_token)
+            return session_response(Response(content=__import__("json").dumps(clean({k:v for k,v in user.items() if k != "password_hash"})), media_type="application/json"), session_token)
         else:
             raise HTTPException(401, "Email not verified")
             

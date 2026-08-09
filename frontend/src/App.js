@@ -174,6 +174,8 @@ function Login() {
         client_id: process.env.REACT_APP_GOOGLE_CLIENT_ID,
         callback: handleGoogleCredential,
         auto_select: false,
+        itp_support: true,
+        use_fedcm_for_button: false,
       });
 
       window.google.accounts.id.renderButton(
