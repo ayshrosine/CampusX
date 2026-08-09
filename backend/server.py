@@ -266,7 +266,8 @@ async def update_profile(payload: ProfileUpdate, user=Depends(current_user)):
 @api.post("/auth/session")
 async def oauth_session(request: Request, response: Response):
     try:
-        token = payload.credential
+        body = await request.json()
+        token = body.get("credential")
         if not token: raise HTTPException(400, "Missing Google ID token")
         
         idinfo = id_token.verify_oauth2_token(
@@ -1033,3 +1034,7 @@ async def startup():
 async def shutdown(): client.close()
 app.include_router(api)
 app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=os.environ.get("CORS_ORIGINS","*").split(","), allow_methods=["*"], allow_headers=["*"])
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=5000)
