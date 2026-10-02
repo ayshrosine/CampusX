@@ -1116,7 +1116,7 @@ function ReportTemplateBuilderModal({ template, onClose, onSaved }) {
         setSortBy(sc.columns?.[0]?.key || "");
       }
     }).catch((e) => toast.error(e.message));
-  }, [source]);
+  }, [source, isEdit, template?.data_source]);
 
   const toggleColumn = (colKey) => {
     if (columns.includes(colKey)) {
@@ -1440,7 +1440,7 @@ function Reports() {
     }).catch(() => {});
     api("/assets").then((a) => {
       setAllAssets(a);
-      if (a.length && !selectedAssetId) setSelectedAssetId(a[0].asset_id);
+      if (a.length) setSelectedAssetId((prev) => prev || a[0].asset_id);
     }).catch(() => {});
   }, []);
 
