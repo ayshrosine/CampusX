@@ -1,12 +1,13 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr, field_validator
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List
-import os, uuid, secrets, bcrypt, logging, time
+from typing import Optional, List, Dict, Any
+import os, uuid, secrets, bcrypt, logging, time, re, io, csv
 from bson import ObjectId
 import cloudinary, cloudinary.utils, cloudinary.uploader
 from google.oauth2 import id_token
@@ -157,6 +158,27 @@ class AuditItemUpdate(BaseModel):
 class NoDuesUpdate(BaseModel):
     status: str
     note: str = ""
+
+class TemplateCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    description: str = Field(default="", max_length=300)
+    data_source: str = "assets"
+    columns: List[str] = Field(min_length=1)
+    filters: dict = Field(default_factory=dict)
+    sort_by: str = ""
+    sort_order: str = "asc"
+    access_roles: List[str] = Field(default_factory=lambda: ["Admin"])
+
+class TemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    data_source: Optional[str] = None
+    columns: Optional[List[str]] = None
+    filters: Optional[dict] = None
+    sort_by: Optional[str] = None
+    sort_order: Optional[str] = None
+    access_roles: Optional[List[str]] = None
+    is_active: Optional[bool] = None
 
 ROLES = {"Admin", "Asset Manager", "HOD", "Employee", "Student"}
 ROLE_PERMISSIONS = {
@@ -622,6 +644,992 @@ async def accreditation_download(format: str = "csv", user=Depends(require_permi
         await log_event(user, "accreditation report downloaded", "report", "accreditation", metadata={"format": "pdf"})
         return StreamingResponse(iter([buf.getvalue()]), media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="assetflow_accreditation.pdf"'})
     raise HTTPException(400, "Unsupported format. Use csv or pdf.")
+
+# ============================================================
+# Advanced Reports Download System & Admin Report Builder
+# ============================================================
+
+DATA_SOURCES_SCHEMA = {
+    "assets": {
+        "label": "Assets & Equipment",
+        "collection": "assets",
+        "columns": [
+            {"key": "tag", "label": "Asset Tag", "type": "string"},
+            {"key": "name", "label": "Asset Name", "type": "string"},
+            {"key": "category", "label": "Category", "type": "string"},
+            {"key": "department", "label": "Department", "type": "string"},
+            {"key": "location", "label": "Location", "type": "string"},
+            {"key": "status", "label": "Status", "type": "string"},
+            {"key": "holder", "label": "Current Holder", "type": "string"},
+            {"key": "serial", "label": "Serial Number", "type": "string"},
+            {"key": "bookable", "label": "Bookable", "type": "boolean"},
+            {"key": "purchase_cost", "label": "Purchase Cost", "type": "number"},
+            {"key": "purchase_date", "label": "Purchase Date", "type": "date"},
+            {"key": "warranty_end", "label": "Warranty End", "type": "date"},
+            {"key": "supplier", "label": "Supplier", "type": "string"},
+            {"key": "created_at", "label": "Registered Date", "type": "datetime"},
+        ],
+        "filterable_fields": [
+            {"key": "department", "label": "Department"},
+            {"key": "status", "label": "Status"},
+            {"key": "category", "label": "Category"},
+            {"key": "bookable", "label": "Bookable"},
+        ]
+    },
+    "maintenance": {
+        "label": "Maintenance & Work Orders",
+        "collection": "maintenance",
+        "columns": [
+            {"key": "request_id", "label": "Request ID", "type": "string"},
+            {"key": "asset_id", "label": "Asset ID", "type": "string"},
+            {"key": "description", "label": "Description", "type": "string"},
+            {"key": "priority", "label": "Priority", "type": "string"},
+            {"key": "status", "label": "Status", "type": "string"},
+            {"key": "raised_by", "label": "Raised By", "type": "string"},
+            {"key": "created_at", "label": "Date Raised", "type": "datetime"},
+            {"key": "resolved_at", "label": "Date Resolved", "type": "datetime"}
+        ],
+        "filterable_fields": [
+            {"key": "priority", "label": "Priority"},
+            {"key": "status", "label": "Status"}
+        ]
+    },
+    "bookings": {
+        "label": "Resource Bookings",
+        "collection": "bookings",
+        "columns": [
+            {"key": "booking_id", "label": "Booking ID", "type": "string"},
+            {"key": "resource_name", "label": "Resource / Room", "type": "string"},
+            {"key": "department", "label": "Department", "type": "string"},
+            {"key": "date", "label": "Date", "type": "date"},
+            {"key": "start_time", "label": "Start Time", "type": "string"},
+            {"key": "end_time", "label": "End Time", "type": "string"},
+            {"key": "event_title", "label": "Event Title", "type": "string"},
+            {"key": "purpose", "label": "Purpose", "type": "string"},
+            {"key": "requested_by", "label": "Requested By", "type": "string"},
+            {"key": "attendees", "label": "Attendees", "type": "number"},
+            {"key": "status", "label": "Status", "type": "string"}
+        ],
+        "filterable_fields": [
+            {"key": "department", "label": "Department"},
+            {"key": "status", "label": "Status"}
+        ]
+    },
+    "users": {
+        "label": "Users & Staff Roster",
+        "collection": "users",
+        "columns": [
+            {"key": "user_id", "label": "User ID", "type": "string"},
+            {"key": "name", "label": "Full Name", "type": "string"},
+            {"key": "email", "label": "Email", "type": "string"},
+            {"key": "role", "label": "Role", "type": "string"},
+            {"key": "department", "label": "Department", "type": "string"},
+            {"key": "status", "label": "Status", "type": "string"},
+            {"key": "phone", "label": "Phone", "type": "string"},
+            {"key": "created_at", "label": "Joined Date", "type": "datetime"}
+        ],
+        "filterable_fields": [
+            {"key": "role", "label": "Role"},
+            {"key": "department", "label": "Department"},
+            {"key": "status", "label": "Status"}
+        ]
+    },
+    "activity": {
+        "label": "Activity & Audit Events",
+        "collection": "activity",
+        "columns": [
+            {"key": "event_id", "label": "Event ID", "type": "string"},
+            {"key": "actor", "label": "Actor", "type": "string"},
+            {"key": "action", "label": "Action", "type": "string"},
+            {"key": "entity_type", "label": "Entity Type", "type": "string"},
+            {"key": "entity_id", "label": "Entity ID", "type": "string"},
+            {"key": "timestamp", "label": "Timestamp", "type": "datetime"}
+        ],
+        "filterable_fields": [
+            {"key": "entity_type", "label": "Entity Type"}
+        ]
+    },
+    "audits": {
+        "label": "Audit Cycles",
+        "collection": "audits",
+        "columns": [
+            {"key": "audit_id", "label": "Audit ID", "type": "string"},
+            {"key": "department", "label": "Department", "type": "string"},
+            {"key": "period", "label": "Period", "type": "string"},
+            {"key": "status", "label": "Status", "type": "string"},
+            {"key": "created_at", "label": "Created At", "type": "datetime"},
+            {"key": "closed_at", "label": "Closed At", "type": "datetime"}
+        ],
+        "filterable_fields": [
+            {"key": "department", "label": "Department"},
+            {"key": "status", "label": "Status"}
+        ]
+    },
+    "nodues": {
+        "label": "No-Dues Clearance",
+        "collection": "nodues",
+        "columns": [
+            {"key": "student_id", "label": "Student ID", "type": "string"},
+            {"key": "student_name", "label": "Student Name", "type": "string"},
+            {"key": "roll_number", "label": "Roll Number", "type": "string"},
+            {"key": "overall_status", "label": "Overall Status", "type": "string"}
+        ],
+        "filterable_fields": [
+            {"key": "overall_status", "label": "Overall Status"}
+        ]
+    }
+}
+
+async def get_active_brand():
+    raw = (await db.branding.find_one({"_id": "singleton"})) or {}
+    return {**BRANDING_DEFAULT, **{k: v for k, v in raw.items() if k != "_id"}}
+
+def build_report_csv(headers: list, rows: list) -> str:
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    if headers:
+        writer.writerow(headers)
+    for r in rows:
+        writer.writerow([str(c if c is not None else "") for c in r])
+    buf.seek(0)
+    return buf.getvalue()
+
+def build_generic_report_pdf(title: str, subtitle: str, meta_pairs: list, headers: list, rows: list, brand: dict, footer_text: Optional[str] = None, col_widths: Optional[list] = None) -> bytes:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    import urllib.request, tempfile
+
+    try: accent = colors.HexColor(brand.get("accent_color") or "#171717")
+    except Exception: accent = colors.HexColor("#171717")
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=28, rightMargin=28, topMargin=28, bottomMargin=28, title=title)
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle("rep_title", parent=styles["Title"], textColor=accent, fontSize=18, leading=22, spaceAfter=3, alignment=0)
+    eyebrow_style = ParagraphStyle("rep_eyebrow", parent=styles["Normal"], textColor=colors.HexColor("#8f8f8f"), fontSize=8.5, leading=10, spaceAfter=3)
+    sub_style = ParagraphStyle("rep_sub", parent=styles["Normal"], textColor=colors.HexColor("#4d4d4d"), fontSize=10, leading=13, spaceAfter=12)
+    meta_k = ParagraphStyle("rep_mk", parent=styles["Normal"], textColor=colors.HexColor("#737373"), fontSize=7.5, leading=9.5, fontName="Helvetica-Bold")
+    meta_v = ParagraphStyle("rep_mv", parent=styles["Normal"], textColor=colors.HexColor("#171717"), fontSize=8, leading=10)
+    hdr_style = ParagraphStyle("rep_th", parent=styles["Normal"], textColor=colors.white, fontSize=7.5, leading=9, fontName="Helvetica-Bold")
+    cell_style = ParagraphStyle("rep_td", parent=styles["Normal"], textColor=colors.HexColor("#171717"), fontSize=7.2, leading=8.8)
+
+    story = []
+
+    logo_url = brand.get("logo_url") or ""
+    if logo_url.startswith("https://"):
+        try:
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".img")
+            with urllib.request.urlopen(logo_url, timeout=3) as r: tmp.write(r.read())
+            tmp.close()
+            story.append(Image(tmp.name, width=24*mm, height=24*mm, kind="proportional"))
+            story.append(Spacer(1, 4))
+        except Exception: pass
+
+    eyebrow_text = f"{brand.get('institution_name', 'AssetFlow Campus')} · {brand.get('accreditation_body', 'Report Center')}".upper()
+    story.append(Paragraph(eyebrow_text, eyebrow_style))
+    story.append(Paragraph(title, title_style))
+    if subtitle:
+        story.append(Paragraph(subtitle, sub_style))
+
+    if meta_pairs:
+        meta_table_rows = []
+        for i in range(0, len(meta_pairs), 2):
+            k1, v1 = meta_pairs[i]
+            k2, v2 = meta_pairs[i+1] if i+1 < len(meta_pairs) else ("", "")
+            meta_table_rows.append([
+                Paragraph(k1, meta_k) if k1 else "",
+                Paragraph(str(v1), meta_v) if k1 else "",
+                Paragraph(k2, meta_k) if k2 else "",
+                Paragraph(str(v2), meta_v) if k2 else "",
+            ])
+        meta_tbl = Table(meta_table_rows, colWidths=[90, 178, 90, 178])
+        meta_tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8f8f8")),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e5e5e5")),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        story.append(meta_tbl)
+        story.append(Spacer(1, 10))
+
+    avail_w = 595 - 56
+    num_cols = max(1, len(headers))
+    if not col_widths or len(col_widths) != num_cols:
+        col_widths = [avail_w / num_cols] * num_cols
+    else:
+        tot = sum(col_widths)
+        if tot > 0:
+            scale = avail_w / tot
+            col_widths = [w * scale for w in col_widths]
+
+    def esc(text):
+        s = str(text if text is not None else "—")
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    tbl_data = [[Paragraph(esc(h), hdr_style) for h in headers]]
+    if rows:
+        for r in rows:
+            tbl_data.append([Paragraph(esc(c), cell_style) for c in r])
+    else:
+        empty_row = [Paragraph("No records found matching criteria", cell_style)] + [Paragraph("", cell_style) for _ in range(num_cols - 1)]
+        tbl_data.append(empty_row)
+
+    data_tbl = Table(tbl_data, colWidths=col_widths, repeatRows=1)
+    t_styles = [
+        ("BACKGROUND", (0, 0), (-1, 0), accent),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5e5e5")),
+    ]
+    for idx in range(1, len(tbl_data)):
+        bg = colors.white if idx % 2 == 1 else colors.HexColor("#fafafa")
+        t_styles.append(("BACKGROUND", (0, idx), (-1, idx), bg))
+
+    data_tbl.setStyle(TableStyle(t_styles))
+    story.append(data_tbl)
+
+    story.append(Spacer(1, 14))
+    f_text = footer_text or brand.get("footer") or BRANDING_DEFAULT["footer"]
+    story.append(Paragraph(f_text, ParagraphStyle("rep_ft", parent=styles["Italic"], textColor=colors.HexColor("#737373"), fontSize=7.5, leading=9.5)))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf.getvalue()
+
+def build_single_asset_pdf(asset: dict, events: list, maints: list, bks: list, auds: list, brand: dict, prepared_by: str) -> bytes:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    import urllib.request, tempfile
+
+    try: accent = colors.HexColor(brand.get("accent_color") or "#171717")
+    except Exception: accent = colors.HexColor("#171717")
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=28, rightMargin=28, topMargin=28, bottomMargin=28, title=f"Lifecycle {asset.get('tag', '')}")
+    styles = getSampleStyleSheet()
+
+    title_s = ParagraphStyle("ast_t", parent=styles["Title"], textColor=accent, fontSize=18, leading=22, spaceAfter=2, alignment=0)
+    eye_s = ParagraphStyle("ast_eye", parent=styles["Normal"], textColor=colors.HexColor("#8f8f8f"), fontSize=8.5, leading=10, spaceAfter=4)
+    sec_s = ParagraphStyle("ast_sec", parent=styles["Heading2"], textColor=accent, fontSize=11, leading=14, spaceBefore=8, spaceAfter=4)
+    mk_s = ParagraphStyle("ast_mk", parent=styles["Normal"], textColor=colors.HexColor("#666666"), fontSize=7.5, leading=9.5, fontName="Helvetica-Bold")
+    mv_s = ParagraphStyle("ast_mv", parent=styles["Normal"], textColor=colors.HexColor("#171717"), fontSize=8, leading=10)
+    th_s = ParagraphStyle("ast_th", parent=styles["Normal"], textColor=colors.white, fontSize=7.5, leading=9, fontName="Helvetica-Bold")
+    td_s = ParagraphStyle("ast_td", parent=styles["Normal"], textColor=colors.HexColor("#171717"), fontSize=7.2, leading=8.8)
+
+    def esc(text):
+        s = str(text if text is not None else "—")
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    story = []
+
+    logo_url = brand.get("logo_url") or ""
+    if logo_url.startswith("https://"):
+        try:
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".img")
+            with urllib.request.urlopen(logo_url, timeout=3) as r: tmp.write(r.read())
+            tmp.close()
+            story.append(Image(tmp.name, width=22*mm, height=22*mm, kind="proportional"))
+            story.append(Spacer(1, 4))
+        except Exception: pass
+
+    story.append(Paragraph(f"{brand.get('institution_name', 'AssetFlow Campus')} · SINGLE ASSET LIFECYCLE AUDIT REPORT".upper(), eye_s))
+    story.append(Paragraph(f"{asset.get('name', 'Asset')} ({asset.get('tag', '')})", title_s))
+    story.append(Paragraph(f"Comprehensive lifecycle trace, maintenance logs, booking load, and audit verification history.", eye_s))
+    story.append(Spacer(1, 6))
+
+    # Asset profile card (2x5 grid)
+    spec_rows = [
+        [Paragraph("Asset Tag", mk_s), Paragraph(esc(asset.get("tag")), mv_s), Paragraph("Department", mk_s), Paragraph(esc(asset.get("department")), mv_s)],
+        [Paragraph("Category", mk_s), Paragraph(esc(asset.get("category")), mv_s), Paragraph("Location", mk_s), Paragraph(esc(asset.get("location")), mv_s)],
+        [Paragraph("Status", mk_s), Paragraph(esc(asset.get("status")), mv_s), Paragraph("Current Holder", mk_s), Paragraph(esc(asset.get("holder")), mv_s)],
+        [Paragraph("Serial No.", mk_s), Paragraph(esc(asset.get("serial")), mv_s), Paragraph("Bookable", mk_s), Paragraph("Yes" if asset.get("bookable") else "No", mv_s)],
+        [Paragraph("Purchase Cost", mk_s), Paragraph(f"Rs. {asset.get('purchase_cost', 0):,.2f}" if asset.get("purchase_cost") else "—", mv_s), Paragraph("Purchase Date", mk_s), Paragraph(esc(asset.get("purchase_date")), mv_s)],
+        [Paragraph("Supplier", mk_s), Paragraph(esc(asset.get("supplier")), mv_s), Paragraph("Warranty End", mk_s), Paragraph(esc(asset.get("warranty_end")), mv_s)],
+        [Paragraph("Report Date", mk_s), Paragraph(datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"), mv_s), Paragraph("Prepared By", mk_s), Paragraph(esc(prepared_by), mv_s)],
+    ]
+    spec_tbl = Table(spec_rows, colWidths=[90, 178, 90, 178])
+    spec_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8f8f8")),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e5e5e5")),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    story.append(spec_tbl)
+
+    # Section 1: Allocation & Lifecycle Timeline
+    story.append(Paragraph("1. Allocation & Lifecycle Timeline (Activity Trail)", sec_s))
+    evt_headers = ["Timestamp (UTC)", "Actor", "Action", "Details"]
+    evt_rows = []
+    for ev in events:
+        ts = ev.get("timestamp", "")[:19].replace("T", " ")
+        meta_str = ", ".join(f"{k}: {v}" for k, v in (ev.get("metadata") or {}).items()) if ev.get("metadata") else "—"
+        evt_rows.append([ts, ev.get("actor", "System"), ev.get("action", ""), meta_str])
+    
+    evt_table_data = [[Paragraph(esc(h), th_s) for h in evt_headers]]
+    if evt_rows:
+        for r in evt_rows:
+            evt_table_data.append([Paragraph(esc(c), td_s) for c in r])
+    else:
+        evt_table_data.append([Paragraph("No lifecycle events recorded", td_s)] + [Paragraph("", td_s) for _ in range(3)])
+
+    evt_tbl = Table(evt_table_data, colWidths=[95, 95, 130, 216], repeatRows=1)
+    evt_styles = [
+        ("BACKGROUND", (0, 0), (-1, 0), accent),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5e5e5")),
+    ]
+    for idx in range(1, len(evt_table_data)):
+        evt_styles.append(("BACKGROUND", (0, idx), (-1, idx), colors.white if idx % 2 == 1 else colors.HexColor("#fafafa")))
+    evt_tbl.setStyle(TableStyle(evt_styles))
+    story.append(evt_tbl)
+
+    # Section 2: Maintenance History
+    story.append(Paragraph("2. Maintenance & Work Order History", sec_s))
+    m_headers = ["Request ID", "Priority", "Status", "Description", "Raised By", "Created", "Resolved"]
+    m_rows = []
+    for m in maints:
+        m_rows.append([
+            m.get("request_id", ""),
+            m.get("priority", "Medium"),
+            m.get("status", ""),
+            m.get("description", ""),
+            m.get("raised_by", ""),
+            m.get("created_at", "")[:10],
+            (m.get("resolved_at") or "—")[:10]
+        ])
+    m_table_data = [[Paragraph(esc(h), th_s) for h in m_headers]]
+    if m_rows:
+        for r in m_rows:
+            m_table_data.append([Paragraph(esc(c), td_s) for c in r])
+    else:
+        m_table_data.append([Paragraph("No maintenance requests recorded for this asset", td_s)] + [Paragraph("", td_s) for _ in range(6)])
+    m_tbl = Table(m_table_data, colWidths=[65, 45, 60, 166, 75, 60, 65], repeatRows=1)
+    m_styles = [
+        ("BACKGROUND", (0, 0), (-1, 0), accent),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5e5e5")),
+    ]
+    for idx in range(1, len(m_table_data)):
+        m_styles.append(("BACKGROUND", (0, idx), (-1, idx), colors.white if idx % 2 == 1 else colors.HexColor("#fafafa")))
+    m_tbl.setStyle(TableStyle(m_styles))
+    story.append(m_tbl)
+
+    # Section 3: Booking Log (if bookable or bookings exist)
+    if bks or asset.get("bookable"):
+        story.append(Paragraph("3. Room / Equipment Reservation Log", sec_s))
+        b_headers = ["Booking ID", "Date", "Slot", "Event / Purpose", "Requested By", "Status"]
+        b_rows = []
+        for b in bks:
+            b_rows.append([
+                b.get("booking_id", ""),
+                b.get("date", ""),
+                f"{b.get('start_time','')} - {b.get('end_time','')}",
+                b.get("event_title") or b.get("purpose", ""),
+                b.get("requested_by", ""),
+                b.get("status", "")
+            ])
+        b_table_data = [[Paragraph(esc(h), th_s) for h in b_headers]]
+        if b_rows:
+            for r in b_rows:
+                b_table_data.append([Paragraph(esc(c), td_s) for c in r])
+        else:
+            b_table_data.append([Paragraph("No bookings recorded", td_s)] + [Paragraph("", td_s) for _ in range(5)])
+        b_tbl = Table(b_table_data, colWidths=[70, 65, 80, 160, 95, 66], repeatRows=1)
+        b_styles = [
+            ("BACKGROUND", (0, 0), (-1, 0), accent),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5e5e5")),
+        ]
+        for idx in range(1, len(b_table_data)):
+            b_styles.append(("BACKGROUND", (0, idx), (-1, idx), colors.white if idx % 2 == 1 else colors.HexColor("#fafafa")))
+        b_tbl.setStyle(TableStyle(b_styles))
+        story.append(b_tbl)
+
+    # Section 4: Audit Verifications
+    story.append(Paragraph("4. Physical Audit Verification History", sec_s))
+    a_headers = ["Audit ID", "Department", "Period", "Verification", "Auditor Notes", "Status"]
+    a_rows = []
+    for a in auds:
+        for it in a.get("items", []):
+            if it.get("asset_id") == asset.get("asset_id") or it.get("tag") == asset.get("tag"):
+                a_rows.append([
+                    a.get("audit_id", ""),
+                    a.get("department", ""),
+                    a.get("period", ""),
+                    it.get("verification", "Pending"),
+                    it.get("note", "—"),
+                    a.get("status", "")
+                ])
+    a_table_data = [[Paragraph(esc(h), th_s) for h in a_headers]]
+    if a_rows:
+        for r in a_rows:
+            a_table_data.append([Paragraph(esc(c), td_s) for c in r])
+    else:
+        a_table_data.append([Paragraph("No physical audit cycle verifications logged", td_s)] + [Paragraph("", td_s) for _ in range(5)])
+    a_tbl = Table(a_table_data, colWidths=[70, 95, 75, 75, 145, 76], repeatRows=1)
+    a_styles = [
+        ("BACKGROUND", (0, 0), (-1, 0), accent),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5e5e5")),
+    ]
+    for idx in range(1, len(a_table_data)):
+        a_styles.append(("BACKGROUND", (0, idx), (-1, idx), colors.white if idx % 2 == 1 else colors.HexColor("#fafafa")))
+    a_tbl.setStyle(TableStyle(a_styles))
+    story.append(a_tbl)
+
+    story.append(Spacer(1, 14))
+    f_text = brand.get("footer") or BRANDING_DEFAULT["footer"]
+    story.append(Paragraph(f_text, ParagraphStyle("rep_ft", parent=styles["Italic"], textColor=colors.HexColor("#737373"), fontSize=7.5, leading=9.5)))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf.getvalue()
+
+def build_single_asset_csv(asset: dict, events: list, maints: list, bks: list, auds: list) -> str:
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["ASSET LIFECYCLE REPORT", asset.get("name", ""), f"Tag: {asset.get('tag', '')}"])
+    writer.writerow([])
+    writer.writerow(["--- ASSET PROFILE ---"])
+    for k in ["tag", "name", "category", "department", "location", "status", "holder", "serial", "bookable", "purchase_cost", "purchase_date", "supplier", "warranty_end"]:
+        writer.writerow([k.replace("_", " ").title(), asset.get(k, "")])
+    writer.writerow([])
+    writer.writerow(["--- LIFECYCLE & ACTIVITY TRAIL ---"])
+    writer.writerow(["Timestamp (UTC)", "Actor", "Action", "Entity Type", "Entity ID", "Notes"])
+    for e in events:
+        writer.writerow([e.get("timestamp", ""), e.get("actor", ""), e.get("action", ""), e.get("entity_type", ""), e.get("entity_id", ""), str(e.get("metadata", ""))])
+    writer.writerow([])
+    writer.writerow(["--- MAINTENANCE HISTORY ---"])
+    writer.writerow(["Request ID", "Priority", "Status", "Description", "Raised By", "Created At", "Resolved At"])
+    for m in maints:
+        writer.writerow([m.get("request_id", ""), m.get("priority", ""), m.get("status", ""), m.get("description", ""), m.get("raised_by", ""), m.get("created_at", ""), m.get("resolved_at", "")])
+    writer.writerow([])
+    writer.writerow(["--- BOOKING UTILIZATION ---"])
+    writer.writerow(["Booking ID", "Date", "Start Time", "End Time", "Purpose / Event", "Requested By", "Status"])
+    for b in bks:
+        writer.writerow([b.get("booking_id", ""), b.get("date", ""), b.get("start_time", ""), b.get("end_time", ""), b.get("event_title") or b.get("purpose", ""), b.get("requested_by", ""), b.get("status", "")])
+    writer.writerow([])
+    writer.writerow(["--- AUDIT VERIFICATIONS ---"])
+    writer.writerow(["Audit ID", "Department", "Period", "Verification", "Note", "Closed At"])
+    for a in auds:
+        for it in a.get("items", []):
+            if it.get("asset_id") == asset.get("asset_id") or it.get("tag") == asset.get("tag"):
+                writer.writerow([a.get("audit_id", ""), a.get("department", ""), a.get("period", ""), it.get("verification", ""), it.get("note", ""), a.get("closed_at", "")])
+    buf.seek(0)
+    return buf.getvalue()
+
+# --- 1. Department Asset Register ---
+@api.get("/reports/department/{dept}/assets")
+async def report_department_assets(dept: str, format: str = "csv", user=Depends(require_permission("reports"))):
+    query = {"department": {"$regex": f"^{re.escape(dept)}$", "$options": "i"}}
+    assets = [clean(x) for x in await db.assets.find(query, {"_id": 0}).sort("name", 1).to_list(1000)]
+    brand = await get_active_brand()
+    headers = ["Tag", "Name", "Category", "Location", "Status", "Holder", "Serial", "Purchase Date", "Cost"]
+    rows = []
+    for a in assets:
+        cost_str = f"{a.get('purchase_cost', 0):,.2f}" if a.get("purchase_cost") else "—"
+        rows.append([a.get("tag", ""), a.get("name", ""), a.get("category", ""), a.get("location", ""), a.get("status", ""), a.get("holder") or "—", a.get("serial", ""), a.get("purchase_date") or "—", cost_str])
+
+    if format == "json":
+        return {
+            "title": f"{dept} Asset Register",
+            "department": dept,
+            "total": len(assets),
+            "allocated": sum(1 for x in assets if x.get("status") == "Allocated"),
+            "available": sum(1 for x in assets if x.get("status") == "Available"),
+            "maintenance": sum(1 for x in assets if x.get("status") == "Under Maintenance"),
+            "items": assets,
+            "headers": headers,
+            "rows": rows
+        }
+    if format == "csv":
+        csv_data = build_report_csv(headers, rows)
+        await log_event(user, "department asset report downloaded", "report", dept, metadata={"format": "csv"})
+        filename = f"assetflow_{dept.lower().replace(' ', '_')}_assets.csv"
+        return StreamingResponse(iter([csv_data]), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    if format == "pdf":
+        meta = [
+            ("Department", dept),
+            ("Total Assets", len(assets)),
+            ("Generated (UTC)", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")),
+            ("Prepared By", user.get("name", "User")),
+            ("Allocated", sum(1 for x in assets if x.get("status") == "Allocated")),
+            ("Available", sum(1 for x in assets if x.get("status") == "Available")),
+        ]
+        col_w = [65, 110, 70, 75, 55, 65, 55, 55, 45]
+        pdf_bytes = build_generic_report_pdf(f"{dept} · Asset Register", "Departmental inventory breakdown and allocation status", meta, headers, rows, brand, col_widths=col_w)
+        await log_event(user, "department asset report downloaded", "report", dept, metadata={"format": "pdf"})
+        filename = f"assetflow_{dept.lower().replace(' ', '_')}_assets.pdf"
+        return StreamingResponse(iter([pdf_bytes]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    raise HTTPException(400, "Unsupported format. Use csv, pdf or json.")
+
+# --- 2. Department Maintenance Log ---
+@api.get("/reports/department/{dept}/maintenance")
+async def report_department_maintenance(dept: str, format: str = "csv", user=Depends(require_permission("reports"))):
+    dept_assets = [clean(x) for x in await db.assets.find({"department": {"$regex": f"^{re.escape(dept)}$", "$options": "i"}}, {"_id": 0, "asset_id": 1, "name": 1, "tag": 1}).to_list(1000)]
+    asset_map = {a["asset_id"]: a for a in dept_assets}
+    query = {"$or": [{"asset_id": {"$in": list(asset_map.keys())}}, {"department": {"$regex": f"^{re.escape(dept)}$", "$options": "i"}}]}
+    maints = [clean(x) for x in await db.maintenance.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)]
+    brand = await get_active_brand()
+    headers = ["Request ID", "Tag", "Asset Name", "Description", "Priority", "Status", "Raised By", "Created", "Resolved"]
+    rows = []
+    for m in maints:
+        ast = asset_map.get(m.get("asset_id")) or {}
+        rows.append([
+            m.get("request_id", ""),
+            ast.get("tag", m.get("asset_id", "")),
+            ast.get("name", "—"),
+            m.get("description", ""),
+            m.get("priority", "Medium"),
+            m.get("status", "Open"),
+            m.get("raised_by", ""),
+            (m.get("created_at") or "")[:10],
+            (m.get("resolved_at") or "—")[:10]
+        ])
+
+    if format == "json":
+        return {
+            "title": f"{dept} Maintenance Work Orders",
+            "department": dept,
+            "total": len(maints),
+            "open": sum(1 for m in maints if m.get("status") not in ["Resolved", "Rejected"]),
+            "resolved": sum(1 for m in maints if m.get("status") == "Resolved"),
+            "items": maints,
+            "headers": headers,
+            "rows": rows
+        }
+    if format == "csv":
+        csv_data = build_report_csv(headers, rows)
+        await log_event(user, "department maintenance report downloaded", "report", dept, metadata={"format": "csv"})
+        filename = f"assetflow_{dept.lower().replace(' ', '_')}_maintenance.csv"
+        return StreamingResponse(iter([csv_data]), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    if format == "pdf":
+        meta = [
+            ("Department", dept),
+            ("Total Requests", len(maints)),
+            ("Generated (UTC)", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")),
+            ("Prepared By", user.get("name", "User")),
+            ("Open / In Progress", sum(1 for m in maints if m.get("status") not in ["Resolved", "Rejected"])),
+            ("Resolved", sum(1 for m in maints if m.get("status") == "Resolved")),
+        ]
+        col_w = [60, 55, 85, 120, 45, 50, 65, 50, 50]
+        pdf_bytes = build_generic_report_pdf(f"{dept} · Maintenance Log", "Work orders, repair history, and resolution tracking", meta, headers, rows, brand, col_widths=col_w)
+        await log_event(user, "department maintenance report downloaded", "report", dept, metadata={"format": "pdf"})
+        filename = f"assetflow_{dept.lower().replace(' ', '_')}_maintenance.pdf"
+        return StreamingResponse(iter([pdf_bytes]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    raise HTTPException(400, "Unsupported format. Use csv, pdf or json.")
+
+# --- 3. Department Booking Log ---
+@api.get("/reports/department/{dept}/bookings")
+async def report_department_bookings(dept: str, format: str = "csv", user=Depends(require_permission("reports"))):
+    dept_assets = [clean(x) for x in await db.assets.find({"department": {"$regex": f"^{re.escape(dept)}$", "$options": "i"}}, {"_id": 0, "asset_id": 1}).to_list(1000)]
+    asset_ids = [a["asset_id"] for a in dept_assets]
+    query = {"$or": [{"department": {"$regex": f"^{re.escape(dept)}$", "$options": "i"}}, {"resource_id": {"$in": asset_ids}}]}
+    bks = [clean(x) for x in await db.bookings.find(query, {"_id": 0}).sort([("date", -1), ("start_time", 1)]).to_list(1000)]
+    brand = await get_active_brand()
+    headers = ["Booking ID", "Resource / Room", "Date", "Time Slot", "Event / Purpose", "Department", "Requested By", "Attendees", "Status"]
+    rows = []
+    for b in bks:
+        rows.append([
+            b.get("booking_id", ""),
+            b.get("resource_name") or b.get("resource_id", ""),
+            b.get("date", ""),
+            f"{b.get('start_time','')} - {b.get('end_time','')}",
+            b.get("event_title") or b.get("purpose", ""),
+            b.get("department", ""),
+            b.get("requested_by", ""),
+            str(b.get("attendees", 0)),
+            b.get("status", "Confirmed")
+        ])
+
+    if format == "json":
+        return {
+            "title": f"{dept} Resource Booking Report",
+            "department": dept,
+            "total": len(bks),
+            "confirmed": sum(1 for b in bks if b.get("status") == "Confirmed"),
+            "items": bks,
+            "headers": headers,
+            "rows": rows
+        }
+    if format == "csv":
+        csv_data = build_report_csv(headers, rows)
+        await log_event(user, "department booking report downloaded", "report", dept, metadata={"format": "csv"})
+        filename = f"assetflow_{dept.lower().replace(' ', '_')}_bookings.csv"
+        return StreamingResponse(iter([csv_data]), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    if format == "pdf":
+        meta = [
+            ("Department", dept),
+            ("Total Bookings", len(bks)),
+            ("Generated (UTC)", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")),
+            ("Prepared By", user.get("name", "User")),
+            ("Confirmed", sum(1 for b in bks if b.get("status") == "Confirmed")),
+            ("Cancelled", sum(1 for b in bks if b.get("status") == "Cancelled")),
+        ]
+        col_w = [60, 95, 55, 65, 110, 60, 65, 40, 50]
+        pdf_bytes = build_generic_report_pdf(f"{dept} · Booking Report", "Space & equipment reservation logs and attendee density", meta, headers, rows, brand, col_widths=col_w)
+        await log_event(user, "department booking report downloaded", "report", dept, metadata={"format": "pdf"})
+        filename = f"assetflow_{dept.lower().replace(' ', '_')}_bookings.pdf"
+        return StreamingResponse(iter([pdf_bytes]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    raise HTTPException(400, "Unsupported format. Use csv, pdf or json.")
+
+# --- 4. Assets Filtered by Status ---
+@api.get("/reports/assets-by-status")
+async def report_assets_by_status(status: str = "All", department: str = "All", format: str = "csv", user=Depends(require_permission("reports"))):
+    query = {}
+    if status != "All": query["status"] = status
+    if department != "All": query["department"] = department
+    assets = [clean(x) for x in await db.assets.find(query, {"_id": 0}).sort("name", 1).to_list(1000)]
+    brand = await get_active_brand()
+    headers = ["Tag", "Name", "Department", "Location", "Category", "Status", "Holder", "Serial"]
+    rows = []
+    for a in assets:
+        rows.append([a.get("tag", ""), a.get("name", ""), a.get("department", ""), a.get("location", ""), a.get("category", ""), a.get("status", ""), a.get("holder") or "—", a.get("serial", "")])
+
+    title = f"Assets Report · Status: {status}" if status != "All" else "Campus Assets by Status"
+    if format == "json":
+        return {"title": title, "status": status, "department": department, "total": len(assets), "items": assets, "headers": headers, "rows": rows}
+    if format == "csv":
+        csv_data = build_report_csv(headers, rows)
+        await log_event(user, "status asset report downloaded", "report", status, metadata={"format": "csv"})
+        filename = f"assetflow_assets_status_{status.lower().replace(' ', '_')}.csv"
+        return StreamingResponse(iter([csv_data]), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    if format == "pdf":
+        meta = [
+            ("Filter Status", status),
+            ("Department Filter", department),
+            ("Total Records", len(assets)),
+            ("Prepared By", user.get("name", "User")),
+            ("Generated (UTC)", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")),
+            ("Format Target", "Campus Audit"),
+        ]
+        col_w = [65, 110, 75, 75, 70, 55, 70, 60]
+        pdf_bytes = build_generic_report_pdf(title, f"Inventory filtered by operational status '{status}' across departments", meta, headers, rows, brand, col_widths=col_w)
+        await log_event(user, "status asset report downloaded", "report", status, metadata={"format": "pdf"})
+        filename = f"assetflow_assets_status_{status.lower().replace(' ', '_')}.pdf"
+        return StreamingResponse(iter([pdf_bytes]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    raise HTTPException(400, "Unsupported format. Use csv, pdf or json.")
+
+# --- 5. Assets Filtered by Category ---
+@api.get("/reports/assets-by-category")
+async def report_assets_by_category(category: str = "All", department: str = "All", format: str = "csv", user=Depends(require_permission("reports"))):
+    query = {}
+    if category != "All": query["category"] = category
+    if department != "All": query["department"] = department
+    assets = [clean(x) for x in await db.assets.find(query, {"_id": 0}).sort("name", 1).to_list(1000)]
+    brand = await get_active_brand()
+    headers = ["Tag", "Name", "Category", "Department", "Location", "Status", "Holder", "Serial"]
+    rows = []
+    for a in assets:
+        rows.append([a.get("tag", ""), a.get("name", ""), a.get("category", ""), a.get("department", ""), a.get("location", ""), a.get("status", ""), a.get("holder") or "—", a.get("serial", "")])
+
+    title = f"Assets Report · Category: {category}" if category != "All" else "Campus Assets by Category"
+    if format == "json":
+        return {"title": title, "category": category, "department": department, "total": len(assets), "items": assets, "headers": headers, "rows": rows}
+    if format == "csv":
+        csv_data = build_report_csv(headers, rows)
+        await log_event(user, "category asset report downloaded", "report", category, metadata={"format": "csv"})
+        filename = f"assetflow_assets_cat_{category.lower().replace(' ', '_')}.csv"
+        return StreamingResponse(iter([csv_data]), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    if format == "pdf":
+        meta = [
+            ("Category", category),
+            ("Department Filter", department),
+            ("Total Records", len(assets)),
+            ("Prepared By", user.get("name", "User")),
+            ("Generated (UTC)", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")),
+            ("Format Target", "Campus Inventory"),
+        ]
+        col_w = [65, 110, 70, 75, 75, 55, 70, 60]
+        pdf_bytes = build_generic_report_pdf(title, f"Inventory filtered by category '{category}' across departments", meta, headers, rows, brand, col_widths=col_w)
+        await log_event(user, "category asset report downloaded", "report", category, metadata={"format": "pdf"})
+        filename = f"assetflow_assets_cat_{category.lower().replace(' ', '_')}.pdf"
+        return StreamingResponse(iter([pdf_bytes]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    raise HTTPException(400, "Unsupported format. Use csv, pdf or json.")
+
+# --- 6. User Asset Holding Report (No-Dues / Clearance) ---
+@api.get("/reports/user-assets/{user_id}")
+async def report_user_assets(user_id: str, format: str = "csv", user=Depends(require_permission("reports"))):
+    target_user = await db.users.find_one({"$or": [{"user_id": user_id}, {"email": user_id}]}, {"_id": 0})
+    target_name = target_user.get("name") if target_user else user_id
+    query = {"$or": [{"holder": target_name}, {"holder": {"$regex": f"^{re.escape(target_name)}$", "$options": "i"}}, {"holder_id": user_id}]}
+    assets = [clean(x) for x in await db.assets.find(query, {"_id": 0}).sort("name", 1).to_list(200)]
+    brand = await get_active_brand()
+    headers = ["Tag", "Name", "Category", "Department", "Location", "Status", "Serial", "Expected Return"]
+    rows = []
+    for a in assets:
+        rows.append([a.get("tag", ""), a.get("name", ""), a.get("category", ""), a.get("department", ""), a.get("location", ""), a.get("status", ""), a.get("serial", ""), a.get("expected_return_at") or "—"])
+
+    title = f"Asset Holding Roster · {target_name}"
+    if format == "json":
+        return {"title": title, "user": target_user or {"name": target_name, "user_id": user_id}, "total": len(assets), "items": assets, "headers": headers, "rows": rows}
+    if format == "csv":
+        csv_data = build_report_csv(headers, rows)
+        await log_event(user, "user asset report downloaded", "report", user_id, metadata={"format": "csv"})
+        filename = f"assetflow_user_{user_id}_assets.csv"
+        return StreamingResponse(iter([csv_data]), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    if format == "pdf":
+        meta = [
+            ("Employee / Student", target_name),
+            ("Department", (target_user or {}).get("department", "—")),
+            ("Role", (target_user or {}).get("role", "—")),
+            ("Total Held Assets", len(assets)),
+            ("Generated (UTC)", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")),
+            ("Clearance Status", "PENDING RETURN" if len(assets) > 0 else "CLEARED (0 ASSETS)"),
+        ]
+        col_w = [65, 115, 75, 70, 75, 55, 60, 65]
+        pdf_bytes = build_generic_report_pdf(title, "Personal asset allocation certificate & no-dues verification extract", meta, headers, rows, brand, col_widths=col_w)
+        await log_event(user, "user asset report downloaded", "report", user_id, metadata={"format": "pdf"})
+        filename = f"assetflow_user_{user_id}_assets.pdf"
+        return StreamingResponse(iter([pdf_bytes]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    raise HTTPException(400, "Unsupported format. Use csv, pdf or json.")
+
+# --- 7. Single Asset Lifecycle Report (Full Lifecycle Trace) ---
+@api.get("/reports/asset/{asset_id}")
+async def report_single_asset(asset_id: str, format: str = "csv", user=Depends(require_permission("reports"))):
+    asset = clean(await db.assets.find_one({"$or": [{"asset_id": asset_id}, {"tag": asset_id}]}, {"_id": 0}))
+    if not asset:
+        raise HTTPException(404, "Asset not found")
+
+    aid = asset["asset_id"]
+    events = [clean(x) for x in await db.activity.find({"entity_id": aid}, {"_id": 0}).sort("timestamp", 1).to_list(200)]
+    maints = [clean(x) for x in await db.maintenance.find({"asset_id": aid}, {"_id": 0}).sort("created_at", -1).to_list(100)]
+    bks = [clean(x) for x in await db.bookings.find({"resource_id": aid}, {"_id": 0}).sort("date", -1).to_list(100)]
+    auds = [clean(x) for x in await db.audits.find({"items.asset_id": aid}, {"_id": 0}).sort("created_at", -1).to_list(50)]
+    brand = await get_active_brand()
+
+    if format == "json":
+        return {
+            "asset": asset,
+            "activity": events,
+            "maintenance": maints,
+            "bookings": bks,
+            "audits": auds,
+            "metrics": {
+                "total_events": len(events),
+                "total_maintenance": len(maints),
+                "open_maintenance": sum(1 for m in maints if m.get("status") not in ["Resolved", "Rejected"]),
+                "total_bookings": len(bks),
+                "audit_verifications": sum(1 for a in auds for it in a.get("items", []) if it.get("asset_id") == aid)
+            }
+        }
+    if format == "csv":
+        csv_data = build_single_asset_csv(asset, events, maints, bks, auds)
+        await log_event(user, "single asset report downloaded", "report", aid, metadata={"format": "csv"})
+        filename = f"assetflow_asset_{asset.get('tag', aid)}_lifecycle.csv"
+        return StreamingResponse(iter([csv_data]), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    if format == "pdf":
+        pdf_bytes = build_single_asset_pdf(asset, events, maints, bks, auds, brand, user.get("name", "User"))
+        await log_event(user, "single asset report downloaded", "report", aid, metadata={"format": "pdf"})
+        filename = f"assetflow_asset_{asset.get('tag', aid)}_lifecycle.pdf"
+        return StreamingResponse(iter([pdf_bytes]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    raise HTTPException(400, "Unsupported format. Use csv, pdf or json.")
+
+# --- 8. Admin Report Templates System ---
+@api.get("/reports/templates/schema/{source}")
+async def report_template_schema(source: str, user=Depends(require_permission("reports"))):
+    if source not in DATA_SOURCES_SCHEMA:
+        raise HTTPException(400, f"Unknown data source '{source}'. Available: {list(DATA_SOURCES_SCHEMA.keys())}")
+    return DATA_SOURCES_SCHEMA[source]
+
+@api.get("/reports/templates")
+async def list_report_templates(user=Depends(require_permission("reports"))):
+    query = {"is_active": {"$ne": False}}
+    # Non-admins only see templates that include their role or "All roles"
+    if user.get("role") != "Admin":
+        query["$or"] = [
+            {"access_roles": user.get("role")},
+            {"access_roles": "All roles"},
+            {"access_roles": "All"}
+        ]
+    templates = [clean(x) for x in await db.report_templates.find(query, {"_id": 0}).sort("name", 1).to_list(100)]
+    return templates
+
+@api.post("/reports/templates")
+async def create_report_template(payload: TemplateCreate, user=Depends(require_permission("admin"))):
+    if payload.data_source not in DATA_SOURCES_SCHEMA:
+        raise HTTPException(400, f"Invalid data source '{payload.data_source}'")
+    tmpl_id = f"tmpl_{uuid.uuid4().hex[:10]}"
+    now = now_iso()
+    doc = {
+        "template_id": tmpl_id,
+        "name": payload.name.strip(),
+        "description": payload.description.strip(),
+        "data_source": payload.data_source,
+        "columns": payload.columns,
+        "filters": payload.filters,
+        "sort_by": payload.sort_by,
+        "sort_order": payload.sort_order,
+        "access_roles": payload.access_roles or ["Admin"],
+        "created_by": user["user_id"],
+        "created_by_name": user.get("name", "Admin"),
+        "created_at": now,
+        "updated_at": now,
+        "is_active": True
+    }
+    await db.report_templates.insert_one(doc)
+    await log_event(user, "report template created", "template", tmpl_id, after={"name": doc["name"], "source": doc["data_source"]})
+    return clean(doc)
+
+@api.get("/reports/templates/{template_id}")
+async def get_report_template(template_id: str, user=Depends(require_permission("reports"))):
+    doc = await db.report_templates.find_one({"template_id": template_id, "is_active": {"$ne": False}}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Template not found")
+    if user.get("role") != "Admin" and user.get("role") not in doc.get("access_roles", []) and "All roles" not in doc.get("access_roles", []):
+        raise HTTPException(403, "You do not have access to this report template")
+    return clean(doc)
+
+@api.put("/reports/templates/{template_id}")
+async def update_report_template(template_id: str, payload: TemplateUpdate, user=Depends(require_permission("admin"))):
+    before = await db.report_templates.find_one({"template_id": template_id}, {"_id": 0})
+    if not before:
+        raise HTTPException(404, "Template not found")
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    updates["updated_at"] = now_iso()
+    await db.report_templates.update_one({"template_id": template_id}, {"$set": updates})
+    after = {**before, **updates}
+    await log_event(user, "report template updated", "template", template_id, before=before, after=after)
+    return clean(after)
+
+@api.delete("/reports/templates/{template_id}")
+async def delete_report_template(template_id: str, user=Depends(require_permission("admin"))):
+    doc = await db.report_templates.find_one({"template_id": template_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Template not found")
+    await db.report_templates.update_one({"template_id": template_id}, {"$set": {"is_active": False, "updated_at": now_iso()}})
+    await log_event(user, "report template deleted", "template", template_id, before={"name": doc.get("name")})
+    return {"ok": True, "message": "Template removed"}
+
+async def execute_template_query(template: dict):
+    source = template.get("data_source", "assets")
+    coll = getattr(db, source, db.assets)
+    query = {}
+    for k, v in (template.get("filters") or {}).items():
+        if v and v != "All":
+            if isinstance(v, str):
+                query[k] = {"$regex": f"^{re.escape(v)}$", "$options": "i"}
+            else:
+                query[k] = v
+
+    sort_field = template.get("sort_by") or "created_at"
+    sort_dir = 1 if template.get("sort_order") == "asc" else -1
+
+    schema = DATA_SOURCES_SCHEMA.get(source, {})
+    col_labels = {c["key"]: c["label"] for c in schema.get("columns", [])}
+    active_cols = template.get("columns") or [c["key"] for c in schema.get("columns", [])[:6]]
+
+    raw_items = [clean(x) for x in await coll.find(query, {"_id": 0}).sort(sort_field, sort_dir).to_list(1500)]
+    headers = [col_labels.get(k, k.replace("_", " ").title()) for k in active_cols]
+
+    rows = []
+    for item in raw_items:
+        row = []
+        for k in active_cols:
+            val = item.get(k)
+            if isinstance(val, bool): val = "Yes" if val else "No"
+            elif isinstance(val, (int, float)) and "cost" in k.lower(): val = f"{val:,.2f}"
+            row.append(val if val is not None else "—")
+        rows.append(row)
+
+    return {
+        "source": source,
+        "headers": headers,
+        "active_cols": active_cols,
+        "rows": rows,
+        "items": raw_items,
+        "total": len(raw_items)
+    }
+
+@api.get("/reports/templates/{template_id}/preview")
+async def preview_report_template(template_id: str, user=Depends(require_permission("reports"))):
+    doc = await db.report_templates.find_one({"template_id": template_id, "is_active": {"$ne": False}}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Template not found")
+    if user.get("role") != "Admin" and user.get("role") not in doc.get("access_roles", []) and "All roles" not in doc.get("access_roles", []):
+        raise HTTPException(403, "You do not have access to this report template")
+
+    data = await execute_template_query(doc)
+    return {
+        "template": clean(doc),
+        "total": data["total"],
+        "headers": data["headers"],
+        "active_cols": data["active_cols"],
+        "preview_rows": data["rows"][:20],
+        "preview_items": data["items"][:20]
+    }
+
+@api.get("/reports/templates/{template_id}/download")
+async def download_report_template(template_id: str, format: str = "csv", user=Depends(require_permission("reports"))):
+    doc = await db.report_templates.find_one({"template_id": template_id, "is_active": {"$ne": False}}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Template not found")
+    if user.get("role") != "Admin" and user.get("role") not in doc.get("access_roles", []) and "All roles" not in doc.get("access_roles", []):
+        raise HTTPException(403, "You do not have access to this report template")
+
+    data = await execute_template_query(doc)
+    brand = await get_active_brand()
+    title = doc.get("name", "Custom Report")
+    subtitle = doc.get("description") or f"Machine-generated from custom template {template_id}"
+    safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', title.lower())
+
+    if format == "csv":
+        csv_data = build_report_csv(data["headers"], data["rows"])
+        await log_event(user, "custom report downloaded", "template", template_id, metadata={"format": "csv", "name": title})
+        return StreamingResponse(iter([csv_data]), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="assetflow_{safe_name}.csv"'})
+
+    if format == "pdf":
+        meta = [
+            ("Template", title),
+            ("Data Source", DATA_SOURCES_SCHEMA.get(doc.get("data_source"), {}).get("label", doc.get("data_source", ""))),
+            ("Total Records", data["total"]),
+            ("Prepared By", user.get("name", "User")),
+            ("Generated (UTC)", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")),
+            ("Filters", ", ".join(f"{k}={v}" for k, v in (doc.get("filters") or {}).items()) or "None"),
+        ]
+        pdf_bytes = build_generic_report_pdf(title, subtitle, meta, data["headers"], data["rows"], brand)
+        await log_event(user, "custom report downloaded", "template", template_id, metadata={"format": "pdf", "name": title})
+        return StreamingResponse(iter([pdf_bytes]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="assetflow_{safe_name}.pdf"'})
+
+    raise HTTPException(400, "Unsupported format. Use csv or pdf.")
+
 
 @api.get("/notifications")
 async def notifications(user=Depends(current_user)):
