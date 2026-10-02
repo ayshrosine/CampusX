@@ -1971,6 +1971,58 @@ async def ensure_supporting_seed():
         await db.categories.insert_many([{ "category_id": f"cat_seed_{i}", "name": name, "example_items": examples, "warranty_tracked": True, "amc_tracked": False, "created_at": now_iso() } for i, (name, examples) in enumerate([("IT Equipment", "Projectors, cameras, laptops"), ("Lab Equipment", "Oscilloscopes, 3D printers"), ("Sports Gear", "Bats, nets, jerseys")])])
     if not await db.nodues.count_documents({}):
         await db.nodues.insert_many([{ "student_id": f"student_seed_{i}", "student_name": name, "roll_number": roll, "overall_status": status, "department_statuses": [{"department": d, "status": "Cleared" if status == "Cleared" else ("Pending" if d == "Library" else "Cleared"), "note": ""} for d in ["Library", "Hostel", "Sports"]] } for i, (name, roll, status) in enumerate([("Ananya Rao", "CSE21A004", "In progress"), ("Vikram Shah", "ME22B018", "Cleared"), ("Sara Thomas", "CE21C011", "In progress")])])
+    if not await db.report_templates.count_documents({}):
+        default_tmpls = [
+            {
+                "template_id": "tmpl_cs_lab_equipment",
+                "name": "CS Department Lab Equipment Status",
+                "description": "All lab machinery and equipment in Computer Science with allocation status and holder info",
+                "data_source": "assets",
+                "columns": ["tag", "name", "category", "location", "status", "holder", "serial", "purchase_cost"],
+                "filters": {"department": "Computer Science", "category": "Lab Equipment"},
+                "sort_by": "name",
+                "sort_order": "asc",
+                "access_roles": ["Admin", "Asset Manager", "HOD"],
+                "created_by": "user_demo_admin",
+                "created_by_name": "Rohan Kapoor",
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+                "is_active": True
+            },
+            {
+                "template_id": "tmpl_allocated_assets",
+                "name": "Campus-Wide Active Asset Allocations",
+                "description": "All allocated equipment across all campus departments with responsible holder names",
+                "data_source": "assets",
+                "columns": ["tag", "name", "department", "location", "category", "holder", "serial"],
+                "filters": {"status": "Allocated"},
+                "sort_by": "department",
+                "sort_order": "asc",
+                "access_roles": ["Admin", "Asset Manager", "HOD", "Employee"],
+                "created_by": "user_demo_admin",
+                "created_by_name": "Rohan Kapoor",
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+                "is_active": True
+            },
+            {
+                "template_id": "tmpl_open_maintenance",
+                "name": "Open Maintenance Work Orders",
+                "description": "Pending and in-progress repair tickets needing immediate technician intervention",
+                "data_source": "maintenance",
+                "columns": ["request_id", "asset_id", "priority", "status", "description", "raised_by", "created_at"],
+                "filters": {"status": "In progress"},
+                "sort_by": "created_at",
+                "sort_order": "desc",
+                "access_roles": ["Admin", "Asset Manager", "HOD"],
+                "created_by": "user_demo_admin",
+                "created_by_name": "Rohan Kapoor",
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+                "is_active": True
+            }
+        ]
+        await db.report_templates.insert_many(default_tmpls)
 
 async def ensure_demo_data():
     """Idempotent rich demo/temporary data so every feature is testable. Uses stable IDs + upserts."""
@@ -2045,4 +2097,4 @@ app.add_middleware(CORSMiddleware, allow_credentials=True, allow_origins=os.envi
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=5000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8001)))
