@@ -1486,6 +1486,27 @@ async def report_single_asset(asset_id: str, format: str = "csv", user=Depends(r
         return StreamingResponse(iter([pdf_bytes]), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
     raise HTTPException(400, "Unsupported format. Use csv, pdf or json.")
 
+# --- Helper endpoints for Report Center filters and sources ---
+@api.get("/reports/metadata")
+async def report_metadata(user=Depends(require_permission("reports"))):
+    depts = [d["name"] for d in await db.departments.find({}, {"_id": 0, "name": 1}).sort("name", 1).to_list(100)]
+    if not depts:
+        depts = ["Computer Science", "Mechanical", "Civil", "Administration", "Sports"]
+    cats = [c["name"] for c in await db.categories.find({}, {"_id": 0, "name": 1}).sort("name", 1).to_list(100)]
+    if not cats:
+        cats = ["IT Equipment", "Lab Equipment", "Sports Gear"]
+    statuses = ["Available", "Allocated", "Under Maintenance", "Lost", "Retired"]
+    return {"departments": depts, "categories": cats, "statuses": statuses}
+
+@api.get("/reports/users")
+async def report_users_list(user=Depends(require_permission("reports"))):
+    users = [clean(u) for u in await db.users.find({}, {"_id": 0, "password_hash": 0}).sort("name", 1).to_list(200)]
+    return users
+
+@api.get("/reports/templates/sources")
+async def report_template_sources(user=Depends(require_permission("reports"))):
+    return [{"key": k, "label": v["label"]} for k, v in DATA_SOURCES_SCHEMA.items()]
+
 # --- 8. Admin Report Templates System ---
 @api.get("/reports/templates/schema/{source}")
 async def report_template_schema(source: str, user=Depends(require_permission("reports"))):
