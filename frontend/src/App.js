@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BrowserRouter, Routes, Route, NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
-import { Activity, Archive, ArrowLeft, ArrowRight, BarChart3, Bell, Box, Calendar, Camera, Check, ChevronRight, ClipboardCheck, Clock3, Download, Eye, FileText, GripVertical, Hammer, Image as ImageIcon, LayoutDashboard, LogOut, MapPin, Menu, MoreHorizontal, Moon, Package, Plus, QrCode, Search, Settings2, Shield, Sun, Trash2, Upload, User, Users, Wrench, X, Zap } from "lucide-react";
+import { Activity, Archive, ArrowLeft, ArrowRight, BarChart3, Bell, Box, Calendar, Camera, Check, CheckCircle2, ChevronDown, ChevronRight, ClipboardCheck, Clock3, Download, Eye, FileText, Filter, GripVertical, Hammer, Image as ImageIcon, Layers, LayoutDashboard, LogOut, MapPin, Menu, MoreHorizontal, Moon, Package, Pencil, Plus, QrCode, RefreshCw, Search, Settings2, Shield, SlidersHorizontal, Sparkles, Sun, Trash2, Upload, User, Users, Wrench, X, Zap } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
 import { Html5Qrcode } from "html5-qrcode";
@@ -994,55 +994,1547 @@ function ActivityPage() {
   );
 }
 
+/* ============================================================
+   Reports & Intelligence — Granular Downloads & Report Builder
+   ============================================================ */
+
+function ReportPreviewTable({ headers = [], rows = [], total = 0, loading = false, title = "Report Preview", emptyMessage = "No matching records found" }) {
+  if (loading) {
+    return (
+      <div className="report-preview-box">
+        <div className="report-preview-header">
+          <h4><Layers size={15} /> {title}</h4>
+          <span className="report-count-indicator">Loading live data…</span>
+        </div>
+        <div className="report-table-empty"><RefreshCw size={18} className="animate-spin" style={{ display: "inline-block", marginRight: 8 }} /> Loading records…</div>
+      </div>
+    );
+  }
+
+  const renderCell = (cell, colIndex) => {
+    if (cell === null || cell === undefined || cell === "") return <span style={{ color: "var(--mute)" }}>—</span>;
+    const str = String(cell);
+    const low = str.toLowerCase();
+    
+    // Status pills
+    if (["available", "resolved", "cleared", "active", "verified", "confirmed"].includes(low)) {
+      return <span className={`status status-${low}`}><i></i>{str}</span>;
+    }
+    if (["under maintenance", "high", "missing", "damaged", "rejected"].includes(low)) {
+      return <span className="status status-under-maintenance"><i></i>{str}</span>;
+    }
+    if (["allocated", "in progress", "pending", "open", "medium", "low"].includes(low)) {
+      const cls = low === "allocated" ? "status-allocated" : "status-pending";
+      return <span className={`status ${cls}`}><i></i>{str}</span>;
+    }
+    // Tag formatting
+    if (str.startsWith("AF-") || str.startsWith("SN-") || str.startsWith("MNT-") || str.startsWith("tmpl_")) {
+      return <span className="mono" style={{ fontWeight: 600 }}>{str}</span>;
+    }
+    return str;
+  };
+
+  return (
+    <div className="report-preview-box" data-testid="report-preview-box">
+      <div className="report-preview-header">
+        <h4><Layers size={15} /> {title}</h4>
+        <span className="report-count-indicator">
+          Showing <b>{rows.length}</b> {total ? <>of <b>{total}</b> records</> : "records"} · {headers.length} columns
+        </span>
+      </div>
+      <div className="report-table-scroll">
+        <table className="report-data-table" data-testid="report-preview-table">
+          <thead>
+            <tr>
+              {headers.map((h, i) => (
+                <th key={i}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={Math.max(1, headers.length)} className="report-table-empty">
+                  {emptyMessage}
+                </td>
+              </tr>
+            ) : (
+              rows.map((row, rIdx) => (
+                <tr key={rIdx} data-testid="report-preview-row">
+                  {row.map((cell, cIdx) => (
+                    <td key={cIdx}>{renderCell(cell, cIdx)}</td>
+                  ))}
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ReportTemplateBuilderModal({ template, onClose, onSaved }) {
+  const isEdit = !!template;
+  const [sources, setSources] = useState([]);
+  const [source, setSource] = useState(template?.data_source || "assets");
+  const [schema, setSchema] = useState(null);
+  const [name, setName] = useState(template?.name || "");
+  const [description, setDescription] = useState(template?.description || "");
+  const [columns, setColumns] = useState(template?.columns || []);
+  const [filters, setFilters] = useState(template?.filters || {});
+  const [sortBy, setSortBy] = useState(template?.sort_by || "");
+  const [sortOrder, setSortOrder] = useState(template?.sort_order || "asc");
+  const [roles, setRoles] = useState(template?.access_roles || ["Admin", "Asset Manager", "HOD"]);
+  const [saving, setSaving] = useState(false);
+  const [previewData, setPreviewData] = useState(null);
+  const [previewing, setPreviewing] = useState(false);
+
+  // Load available data sources
+  useEffect(() => {
+    api("/reports/templates/sources").then(setSources).catch(() => {
+      setSources([
+        { key: "assets", label: "Assets & Equipment" },
+        { key: "maintenance", label: "Maintenance & Work Orders" },
+        { key: "bookings", label: "Resource Bookings" },
+        { key: "users", label: "Users & Staff Roster" },
+        { key: "activity", label: "Activity & Audit Events" },
+        { key: "audits", label: "Audit Cycles" },
+        { key: "nodues", label: "No-Dues Clearance" }
+      ]);
+    });
+  }, []);
+
+  // Load schema whenever data source changes
+  useEffect(() => {
+    if (!source) return;
+    api(`/reports/templates/schema/${source}`).then((sc) => {
+      setSchema(sc);
+      if (!isEdit || source !== template?.data_source) {
+        setColumns(sc.columns ? sc.columns.slice(0, 6).map((c) => c.key) : []);
+        setFilters({});
+        setSortBy(sc.columns?.[0]?.key || "");
+      }
+    }).catch((e) => toast.error(e.message));
+  }, [source]);
+
+  const toggleColumn = (colKey) => {
+    if (columns.includes(colKey)) {
+      if (columns.length === 1) { toast.error("Report must have at least one column"); return; }
+      setColumns(columns.filter((c) => c !== colKey));
+    } else {
+      setColumns([...columns, colKey]);
+    }
+  };
+
+  const selectAllColumns = () => {
+    if (schema?.columns) setColumns(schema.columns.map((c) => c.key));
+  };
+
+  const clearAllColumns = () => {
+    if (schema?.columns?.[0]) setColumns([schema.columns[0].key]);
+  };
+
+  const toggleRole = (r) => {
+    if (roles.includes(r)) {
+      if (roles.length === 1) { toast.error("Select at least one role"); return; }
+      setRoles(roles.filter((x) => x !== r));
+    } else {
+      setRoles([...roles, r]);
+    }
+  };
+
+  const handlePreview = async () => {
+    setPreviewing(true);
+    try {
+      // Create a temporary preview query or preview endpoint
+      const res = await api(`/reports/templates`, {
+        method: "POST",
+        body: JSON.stringify({
+          name: name.trim() || "Preview Report",
+          description: description.trim(),
+          data_source: source,
+          columns,
+          filters,
+          sort_by: sortBy,
+          sort_order: sortOrder,
+          access_roles: roles
+        })
+      });
+      const prev = await api(`/reports/templates/${res.template_id}/preview`);
+      setPreviewData(prev);
+      // clean up temporary template
+      await api(`/reports/templates/${res.template_id}`, { method: "DELETE" }).catch(() => {});
+    } catch (e) {
+      toast.error(`Preview error: ${e.message}`);
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) { toast.error("Please enter a report name"); return; }
+    if (columns.length === 0) { toast.error("Select at least one column"); return; }
+    setSaving(true);
+    try {
+      const payload = {
+        name: name.trim(),
+        description: description.trim(),
+        data_source: source,
+        columns,
+        filters,
+        sort_by: sortBy,
+        sort_order: sortOrder,
+        access_roles: roles
+      };
+      let res;
+      if (isEdit) {
+        res = await api(`/reports/templates/${template.template_id}`, { method: "PUT", body: JSON.stringify(payload) });
+        toast.success("Template updated successfully");
+      } else {
+        res = await api(`/reports/templates`, { method: "POST", body: JSON.stringify(payload) });
+        toast.success("Template created successfully");
+      }
+      onSaved(res);
+      onClose();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose} data-testid="template-builder-overlay">
+      <div className="builder-modal" onClick={(e) => e.stopPropagation()} data-testid="template-builder-modal">
+        <div className="modal-title">
+          <div>
+            <p className="eyebrow">ADMIN REPORT BUILDER</p>
+            <h2>{isEdit ? "Edit Report Template" : "Build Custom Report Template"}</h2>
+            <p className="muted" style={{ margin: "4px 0 0" }}>Configure data source, pick columns, and define audience permissions.</p>
+          </div>
+          <button className="icon-btn" onClick={onClose} aria-label="Close" data-testid="template-builder-close"><X size={16} /></button>
+        </div>
+
+        <form onSubmit={handleSave} style={{ display: "grid", gap: 16 }}>
+          <div className="builder-section">
+            <h5>Basic Information</h5>
+            <div style={{ display: "grid", gap: 10 }}>
+              <div className="report-filter-item">
+                <label>Template Name *</label>
+                <input
+                  data-testid="template-name-input"
+                  placeholder="e.g. CS Lab Equipment Status"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="report-filter-item">
+                <label>Description / Purpose</label>
+                <input
+                  data-testid="template-desc-input"
+                  placeholder="e.g. All lab machinery in CS dept with current status and holder"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+              </div>
+              <div className="report-filter-item">
+                <label>Data Source (MongoDB Collection)</label>
+                <select
+                  data-testid="template-source-select"
+                  value={source}
+                  onChange={(e) => setSource(e.target.value)}
+                  disabled={isEdit}
+                >
+                  {sources.map((s) => (
+                    <option key={s.key} value={s.key}>{s.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="builder-section">
+            <h5>
+              <span>Select Columns ({columns.length} chosen)</span>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" className="link-btn" onClick={selectAllColumns} style={{ fontSize: 11 }}>Select all</button>
+                <button type="button" className="link-btn" onClick={clearAllColumns} style={{ fontSize: 11 }}>Reset</button>
+              </div>
+            </h5>
+            <div className="columns-checkbox-grid" data-testid="template-columns-grid">
+              {(schema?.columns || []).map((col) => {
+                const checked = columns.includes(col.key);
+                return (
+                  <label key={col.key} className="col-check-label" data-testid={`col-check-${col.key}`}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleColumn(col.key)}
+                    />
+                    <span>{col.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          {(schema?.filterable_fields || []).length > 0 && (
+            <div className="builder-section">
+              <h5>Preset Filters (Optional)</h5>
+              <div className="filter-builder-grid">
+                {schema.filterable_fields.map((f) => (
+                  <div key={f.key} className="report-filter-item">
+                    <label>{f.label}</label>
+                    <input
+                      placeholder="Any (or enter value)"
+                      value={filters[f.key] || ""}
+                      onChange={(e) => setFilters({ ...filters, [f.key]: e.target.value })}
+                      data-testid={`filter-input-${f.key}`}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="builder-section">
+            <h5>Sorting</h5>
+            <div className="sort-builder-row">
+              <div className="report-filter-item" style={{ flex: 2 }}>
+                <label>Sort By Field</label>
+                <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} data-testid="sort-by-select">
+                  <option value="">Default (Registered Date)</option>
+                  {(schema?.columns || []).map((c) => (
+                    <option key={c.key} value={c.key}>{c.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="report-filter-item" style={{ flex: 1 }}>
+                <label>Order</label>
+                <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} data-testid="sort-order-select">
+                  <option value="asc">Ascending (A–Z)</option>
+                  <option value="desc">Descending (Z–A)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="builder-section">
+            <h5>Audience & Access Roles</h5>
+            <div className="roles-check-row">
+              {["Admin", "Asset Manager", "HOD", "Employee", "Student", "All roles"].map((r) => (
+                <label key={r} className="col-check-label" data-testid={`role-check-${r.replace(" ", "-")}`}>
+                  <input
+                    type="checkbox"
+                    checked={roles.includes(r)}
+                    onChange={() => toggleRole(r)}
+                  />
+                  <span>{r}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {previewData && (
+            <div className="builder-section">
+              <h5>Live Data Preview ({previewData.total} matches)</h5>
+              <ReportPreviewTable
+                headers={previewData.headers}
+                rows={previewData.preview_rows}
+                total={previewData.total}
+                title="Previewing First 20 Rows"
+              />
+            </div>
+          )}
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 14, borderTop: "1px solid var(--hairline)" }}>
+            <button
+              type="button"
+              className="secondary-btn"
+              disabled={previewing}
+              onClick={handlePreview}
+              data-testid="template-builder-preview-btn"
+            >
+              <Eye size={13} /> {previewing ? "Previewing…" : "Preview Live Data"}
+            </button>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button type="button" className="secondary-btn" onClick={onClose}>Cancel</button>
+              <button
+                type="submit"
+                className="primary-btn"
+                disabled={saving}
+                data-testid="template-builder-save-btn"
+              >
+                {saving ? "Saving…" : isEdit ? "Update Template" : "Save & Publish Template"}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function Reports() {
-  const [data, setData] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [activeTab, setActiveTab] = useState("department");
+  const [metadata, setMetadata] = useState({ departments: [], categories: [], statuses: [] });
+  const [usersList, setUsersList] = useState([]);
+  const [overviewData, setOverviewData] = useState(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { api("/reports").then(setData); }, []);
-  if (!data) return <div className="loading">Loading reports…</div>;
-  const download = async (format) => {
+
+  // Tab 1: Department Reports State
+  const [selectedDept, setSelectedDept] = useState("Computer Science");
+  const [deptSubreport, setDeptSubreport] = useState("assets");
+  const [deptData, setDeptData] = useState(null);
+  const [deptLoading, setDeptLoading] = useState(false);
+
+  // Tab 2: By Status State
+  const [selectedStatus, setSelectedStatus] = useState("Allocated");
+  const [statusDept, setStatusDept] = useState("All");
+  const [statusData, setStatusData] = useState(null);
+  const [statusLoading, setStatusLoading] = useState(false);
+
+  // Tab 3: By Category State
+  const [selectedCategory, setSelectedCategory] = useState("Lab Equipment");
+  const [categoryDept, setCategoryDept] = useState("All");
+  const [categoryData, setCategoryData] = useState(null);
+  const [categoryLoading, setCategoryLoading] = useState(false);
+
+  // Tab 4: User Assets State
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [userAssetData, setUserAssetData] = useState(null);
+  const [userLoading, setUserLoading] = useState(false);
+
+  // Tab 5: Single Asset Lifecycle State
+  const [assetSearch, setAssetSearch] = useState("");
+  const [selectedAssetId, setSelectedAssetId] = useState("ast_seed_0");
+  const [assetData, setAssetData] = useState(null);
+  const [assetLoading, setAssetLoading] = useState(false);
+  const [assetSubTab, setAssetSubTab] = useState("timeline");
+  const [allAssets, setAllAssets] = useState([]);
+
+  // Tab 6: Custom Reports (Templates) State
+  const [templates, setTemplates] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [expandedPreviewId, setExpandedPreviewId] = useState(null);
+  const [templatePreviews, setTemplatePreviews] = useState({});
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState(null);
+
+  // Initial load: current user, overview data, metadata, users
+  useEffect(() => {
+    api("/auth/me").then(setCurrentUser).catch(() => {});
+    api("/reports").then(setOverviewData).catch(() => {});
+    api("/reports/metadata").then((m) => {
+      setMetadata(m);
+      if (m.departments?.length) setSelectedDept((d) => d || m.departments[0]);
+      if (m.categories?.length) setSelectedCategory((c) => c || m.categories[0]);
+    }).catch(() => {});
+    api("/reports/users").then((u) => {
+      setUsersList(u);
+      if (u.length) setSelectedUserId((prev) => prev || u[0].user_id);
+    }).catch(() => {});
+    api("/assets").then((a) => {
+      setAllAssets(a);
+      if (a.length && !selectedAssetId) setSelectedAssetId(a[0].asset_id);
+    }).catch(() => {});
+  }, []);
+
+  // Generic Download Helper
+  const downloadReport = async (path, defaultFilename, format = "csv") => {
     setBusy(true);
     try {
-      const res = await fetch(`${API}/reports/accreditation/download?format=${format}`, { credentials: "include" });
-      if (!res.ok) throw new Error("Download failed");
+      const sep = path.includes("?") ? "&" : "?";
+      const res = await fetch(`${API}${path}${sep}format=${format}`, { credentials: "include" });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Download failed (${res.status})`);
+      }
       const blob = await res.blob();
+      let filename = defaultFilename.endsWith(`.${format}`) ? defaultFilename : `${defaultFilename}.${format}`;
+      const disp = res.headers.get("Content-Disposition");
+      if (disp && disp.includes("filename=")) {
+        const m = disp.match(/filename="?([^"]+)"?/);
+        if (m && m[1]) filename = m[1];
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `assetflow_accreditation.${format}`;
-      document.body.appendChild(a); a.click(); a.remove();
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
       URL.revokeObjectURL(url);
       toast.success(`Report downloaded as ${format.toUpperCase()}`);
-    } catch (e) { toast.error(e.message); } finally { setBusy(false); }
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
   };
+
+  // Tab 1 Fetcher
+  const loadDeptReport = useCallback(async () => {
+    if (!selectedDept) return;
+    setDeptLoading(true);
+    try {
+      const d = await api(`/reports/department/${encodeURIComponent(selectedDept)}/${deptSubreport}?format=json`);
+      setDeptData(d);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setDeptLoading(false);
+    }
+  }, [selectedDept, deptSubreport]);
+
+  useEffect(() => {
+    if (activeTab === "department") loadDeptReport();
+  }, [activeTab, loadDeptReport]);
+
+  // Tab 2 Fetcher (By Status)
+  const loadStatusReport = useCallback(async () => {
+    setStatusLoading(true);
+    try {
+      const d = await api(`/reports/assets-by-status?status=${encodeURIComponent(selectedStatus)}&department=${encodeURIComponent(statusDept)}&format=json`);
+      setStatusData(d);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setStatusLoading(false);
+    }
+  }, [selectedStatus, statusDept]);
+
+  useEffect(() => {
+    if (activeTab === "status") loadStatusReport();
+  }, [activeTab, loadStatusReport]);
+
+  // Tab 3 Fetcher (By Category)
+  const loadCategoryReport = useCallback(async () => {
+    setCategoryLoading(true);
+    try {
+      const d = await api(`/reports/assets-by-category?category=${encodeURIComponent(selectedCategory)}&department=${encodeURIComponent(categoryDept)}&format=json`);
+      setCategoryData(d);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setCategoryLoading(false);
+    }
+  }, [selectedCategory, categoryDept]);
+
+  useEffect(() => {
+    if (activeTab === "category") loadCategoryReport();
+  }, [activeTab, loadCategoryReport]);
+
+  // Tab 4 Fetcher (User Assets)
+  const loadUserAssetReport = useCallback(async () => {
+    if (!selectedUserId) return;
+    setUserLoading(true);
+    try {
+      const d = await api(`/reports/user-assets/${encodeURIComponent(selectedUserId)}?format=json`);
+      setUserAssetData(d);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setUserLoading(false);
+    }
+  }, [selectedUserId]);
+
+  useEffect(() => {
+    if (activeTab === "user") loadUserAssetReport();
+  }, [activeTab, loadUserAssetReport]);
+
+  // Tab 5 Fetcher (Single Asset)
+  const loadSingleAssetReport = useCallback(async () => {
+    if (!selectedAssetId) return;
+    setAssetLoading(true);
+    try {
+      const d = await api(`/reports/asset/${encodeURIComponent(selectedAssetId)}?format=json`);
+      setAssetData(d);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setAssetLoading(false);
+    }
+  }, [selectedAssetId]);
+
+  useEffect(() => {
+    if (activeTab === "single_asset") loadSingleAssetReport();
+  }, [activeTab, loadSingleAssetReport]);
+
+  // Tab 6 Fetcher (Custom Reports / Templates)
+  const loadTemplates = useCallback(async () => {
+    setTemplatesLoading(true);
+    try {
+      const t = await api("/reports/templates");
+      setTemplates(t);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setTemplatesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "custom") loadTemplates();
+  }, [activeTab, loadTemplates]);
+
+  const toggleTemplatePreview = async (templateId) => {
+    if (expandedPreviewId === templateId) {
+      setExpandedPreviewId(null);
+      return;
+    }
+    setExpandedPreviewId(templateId);
+    if (!templatePreviews[templateId]) {
+      try {
+        const prev = await api(`/reports/templates/${templateId}/preview`);
+        setTemplatePreviews((p) => ({ ...p, [templateId]: prev }));
+      } catch (e) {
+        toast.error(`Preview failed: ${e.message}`);
+      }
+    }
+  };
+
+  const handleDeleteTemplate = async (templateId, name) => {
+    if (!window.confirm(`Are you sure you want to remove template "${name}"?`)) return;
+    try {
+      await api(`/reports/templates/${templateId}`, { method: "DELETE" });
+      toast.success("Template deleted");
+      loadTemplates();
+    } catch (e) {
+      toast.error(e.message);
+    }
+  };
+
+  const filteredAssetSuggestions = assetSearch.trim()
+    ? allAssets.filter((a) =>
+        (a.name || "").toLowerCase().includes(assetSearch.toLowerCase()) ||
+        (a.tag || "").toLowerCase().includes(assetSearch.toLowerCase()) ||
+        (a.serial || "").toLowerCase().includes(assetSearch.toLowerCase())
+      ).slice(0, 8)
+    : [];
+
   return (
     <>
-      <PageHeader eyebrow="CAMPUS INTELLIGENCE" title="Reports & analytics" description="A clear view of utilization, ownership, and operational load." action={
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button data-testid="report-download-csv" className="secondary-btn" disabled={busy} onClick={() => download("csv")}><Download size={13} /> CSV</button>
-          <button data-testid="report-download-pdf" className="primary-btn" disabled={busy} onClick={() => download("pdf")}><FileText size={13} /> PDF</button>
-        </div>
-      } />
-      <div className="metric-grid">
-        <div className="metric"><div className="metric-top"><span>Total tracked</span><Box size={16} /></div><strong>{data.total}</strong><small>Across all departments</small></div>
-        {Object.entries(data.status_counts).slice(0, 3).map(([k, v]) => (
-          <div className="metric" key={k}><div className="metric-top"><span>{k}</span><Activity size={16} /></div><strong>{v}</strong><small>Current inventory</small></div>
-        ))}
-      </div>
-      <section className="surface report-table">
-        <div className="section-title"><div><p className="eyebrow">UTILIZATION BY DEPARTMENT</p><h3>Where resources are moving</h3></div></div>
-        {data.departments.map((x) => {
-          const pct = x.total ? Math.round((x.allocated / x.total) * 100) : 0;
-          return (
-            <div data-testid="report-department-row" className="report-row" key={x.name}>
-              <div><b>{x.name}</b><small>{x.allocated} of {x.total}</small></div>
-              <div className="progress"><span style={{ width: `${pct}%` }} /></div>
-              <strong>{pct}%</strong>
+      <PageHeader
+        eyebrow="CAMPUS INTELLIGENCE"
+        title="Reports & Analytics"
+        description="Comprehensive departmental registers, operational traces, custom templates, and accreditation evidence."
+        action={
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            {currentUser?.role === "Admin" && (
+              <button
+                data-testid="create-template-top-btn"
+                className="primary-btn"
+                onClick={() => { setEditingTemplate(null); setBuilderOpen(true); }}
+              >
+                <Plus size={14} /> New Template
+              </button>
+            )}
+            <button
+              data-testid="report-download-csv"
+              className="secondary-btn"
+              disabled={busy}
+              onClick={() => downloadReport("/reports/accreditation/download", "assetflow_accreditation", "csv")}
+            >
+              <Download size={13} /> Accreditation CSV
+            </button>
+            <button
+              data-testid="report-download-pdf"
+              className="secondary-btn"
+              disabled={busy}
+              onClick={() => downloadReport("/reports/accreditation/download", "assetflow_accreditation", "pdf")}
+            >
+              <FileText size={13} /> Accreditation PDF
+            </button>
+          </div>
+        }
+      />
+
+      {/* Top Metric Cards */}
+      {overviewData && (
+        <div className="metric-grid">
+          <div className="metric">
+            <div className="metric-top"><span>Total Tracked</span><Box size={16} /></div>
+            <strong>{overviewData.total}</strong>
+            <small>Across all campus departments</small>
+          </div>
+          {Object.entries(overviewData.status_counts).slice(0, 3).map(([k, v]) => (
+            <div className="metric" key={k}>
+              <div className="metric-top"><span>{k}</span><Activity size={16} /></div>
+              <strong>{v}</strong>
+              <small>Current inventory count</small>
             </div>
-          );
-        })}
+          ))}
+        </div>
+      )}
+
+      {/* Report Center Shell */}
+      <section className="report-center-shell">
+        {/* Navigation Tabs */}
+        <div className="report-tabs" role="tablist">
+          <button
+            data-testid="report-tab-department"
+            className={`report-tab-btn ${activeTab === "department" ? "active" : ""}`}
+            onClick={() => setActiveTab("department")}
+          >
+            <Package size={14} /> Department Reports
+          </button>
+          <button
+            data-testid="report-tab-status"
+            className={`report-tab-btn ${activeTab === "status" ? "active" : ""}`}
+            onClick={() => setActiveTab("status")}
+          >
+            <Activity size={14} /> By Status
+          </button>
+          <button
+            data-testid="report-tab-category"
+            className={`report-tab-btn ${activeTab === "category" ? "active" : ""}`}
+            onClick={() => setActiveTab("category")}
+          >
+            <Filter size={14} /> By Category
+          </button>
+          <button
+            data-testid="report-tab-user"
+            className={`report-tab-btn ${activeTab === "user" ? "active" : ""}`}
+            onClick={() => setActiveTab("user")}
+          >
+            <User size={14} /> User & No-Dues
+          </button>
+          <button
+            data-testid="report-tab-single-asset"
+            className={`report-tab-btn ${activeTab === "single_asset" ? "active" : ""}`}
+            onClick={() => setActiveTab("single_asset")}
+          >
+            <Sparkles size={14} /> Single Asset Lifecycle
+          </button>
+          <button
+            data-testid="report-tab-custom"
+            className={`report-tab-btn ${activeTab === "custom" ? "active" : ""}`}
+            onClick={() => setActiveTab("custom")}
+          >
+            <SlidersHorizontal size={14} /> Custom Reports
+            <span className="report-tab-badge">{templates.length}</span>
+          </button>
+          <button
+            data-testid="report-tab-accreditation"
+            className={`report-tab-btn ${activeTab === "accreditation" ? "active" : ""}`}
+            onClick={() => setActiveTab("accreditation")}
+          >
+            <ClipboardCheck size={14} /> Accreditation & Utilization
+          </button>
+        </div>
+
+        {/* ============================================================
+            TAB 1: Department Reports
+            ============================================================ */}
+        {activeTab === "department" && (
+          <div style={{ display: "grid", gap: 16 }}>
+            <div className="report-controls-card">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+                <div className="report-subtypes">
+                  <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--mute)", textTransform: "uppercase" }}>Type:</span>
+                  <button
+                    data-testid="report-subtype-assets"
+                    className={`report-subtype-pill ${deptSubreport === "assets" ? "active" : ""}`}
+                    onClick={() => setDeptSubreport("assets")}
+                  >
+                    <Package size={13} /> Asset Register
+                  </button>
+                  <button
+                    data-testid="report-subtype-maintenance"
+                    className={`report-subtype-pill ${deptSubreport === "maintenance" ? "active" : ""}`}
+                    onClick={() => setDeptSubreport("maintenance")}
+                  >
+                    <Wrench size={13} /> Maintenance History
+                  </button>
+                  <button
+                    data-testid="report-subtype-bookings"
+                    className={`report-subtype-pill ${deptSubreport === "bookings" ? "active" : ""}`}
+                    onClick={() => setDeptSubreport("bookings")}
+                  >
+                    <Clock3 size={13} /> Reservation Log
+                  </button>
+                </div>
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    data-testid="dept-download-csv"
+                    className="secondary-btn"
+                    disabled={busy || deptLoading}
+                    onClick={() => downloadReport(`/reports/department/${encodeURIComponent(selectedDept)}/${deptSubreport}`, `${selectedDept}_${deptSubreport}`, "csv")}
+                  >
+                    <Download size={13} /> Export CSV
+                  </button>
+                  <button
+                    data-testid="dept-download-pdf"
+                    className="primary-btn"
+                    disabled={busy || deptLoading}
+                    onClick={() => downloadReport(`/reports/department/${encodeURIComponent(selectedDept)}/${deptSubreport}`, `${selectedDept}_${deptSubreport}`, "pdf")}
+                  >
+                    <FileText size={13} /> Export PDF
+                  </button>
+                </div>
+              </div>
+
+              <div className="report-filter-grid">
+                <div className="report-filter-item">
+                  <label>Select Department</label>
+                  <select
+                    data-testid="report-department-select"
+                    value={selectedDept}
+                    onChange={(e) => setSelectedDept(e.target.value)}
+                  >
+                    {metadata.departments.map((d) => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {deptData && (
+                  <div style={{ display: "flex", gap: 16, alignItems: "center", marginLeft: "auto", flexWrap: "wrap" }}>
+                    <div className="report-count-indicator">Total: <b>{deptData.total || 0}</b></div>
+                    {deptSubreport === "assets" && (
+                      <>
+                        <div className="report-count-indicator">Allocated: <b style={{ color: "var(--link)" }}>{deptData.allocated || 0}</b></div>
+                        <div className="report-count-indicator">Available: <b style={{ color: "var(--success)" }}>{deptData.available || 0}</b></div>
+                        <div className="report-count-indicator">Under Maint: <b style={{ color: "var(--error)" }}>{deptData.maintenance || 0}</b></div>
+                      </>
+                    )}
+                    {deptSubreport === "maintenance" && (
+                      <>
+                        <div className="report-count-indicator">Open / In Progress: <b style={{ color: "var(--warning)" }}>{deptData.open || 0}</b></div>
+                        <div className="report-count-indicator">Resolved: <b style={{ color: "var(--success)" }}>{deptData.resolved || 0}</b></div>
+                      </>
+                    )}
+                    {deptSubreport === "bookings" && (
+                      <div className="report-count-indicator">Confirmed: <b style={{ color: "var(--success)" }}>{deptData.confirmed || 0}</b></div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <ReportPreviewTable
+              headers={deptData?.headers || []}
+              rows={deptData?.rows || []}
+              total={deptData?.total || 0}
+              loading={deptLoading}
+              title={`${selectedDept} · ${deptSubreport === "assets" ? "Asset Register" : deptSubreport === "maintenance" ? "Work Order Log" : "Booking Records"}`}
+              emptyMessage={`No ${deptSubreport} records recorded for ${selectedDept}`}
+            />
+          </div>
+        )}
+
+        {/* ============================================================
+            TAB 2: By Status
+            ============================================================ */}
+        {activeTab === "status" && (
+          <div style={{ display: "grid", gap: 16 }}>
+            <div className="report-controls-card">
+              <div className="report-filter-grid">
+                <div className="report-filter-item">
+                  <label>Status</label>
+                  <select
+                    data-testid="report-status-select"
+                    value={selectedStatus}
+                    onChange={(e) => setSelectedStatus(e.target.value)}
+                  >
+                    <option value="All">All Operational Statuses</option>
+                    {["Available", "Allocated", "Under Maintenance", "Lost", "Retired"].map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="report-filter-item">
+                  <label>Department Filter</label>
+                  <select
+                    data-testid="report-status-dept-select"
+                    value={statusDept}
+                    onChange={(e) => setStatusDept(e.target.value)}
+                  >
+                    <option value="All">All Departments</option>
+                    {metadata.departments.map((d) => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+                  <button
+                    data-testid="status-download-csv"
+                    className="secondary-btn"
+                    disabled={busy || statusLoading}
+                    onClick={() => downloadReport(`/reports/assets-by-status?status=${encodeURIComponent(selectedStatus)}&department=${encodeURIComponent(statusDept)}`, `assets_status_${selectedStatus.toLowerCase()}`, "csv")}
+                  >
+                    <Download size={13} /> Export CSV
+                  </button>
+                  <button
+                    data-testid="status-download-pdf"
+                    className="primary-btn"
+                    disabled={busy || statusLoading}
+                    onClick={() => downloadReport(`/reports/assets-by-status?status=${encodeURIComponent(selectedStatus)}&department=${encodeURIComponent(statusDept)}`, `assets_status_${selectedStatus.toLowerCase()}`, "pdf")}
+                  >
+                    <FileText size={13} /> Export PDF
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <ReportPreviewTable
+              headers={statusData?.headers || []}
+              rows={statusData?.rows || []}
+              total={statusData?.total || 0}
+              loading={statusLoading}
+              title={`Status Filter · ${selectedStatus} ${statusDept !== "All" ? `(${statusDept})` : "(Campus-Wide)"}`}
+              emptyMessage={`No assets currently marked as "${selectedStatus}" in selected department`}
+            />
+          </div>
+        )}
+
+        {/* ============================================================
+            TAB 3: By Category
+            ============================================================ */}
+        {activeTab === "category" && (
+          <div style={{ display: "grid", gap: 16 }}>
+            <div className="report-controls-card">
+              <div className="report-filter-grid">
+                <div className="report-filter-item">
+                  <label>Category</label>
+                  <select
+                    data-testid="report-category-select"
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                  >
+                    <option value="All">All Categories</option>
+                    {metadata.categories.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="report-filter-item">
+                  <label>Department Filter</label>
+                  <select
+                    data-testid="report-category-dept-select"
+                    value={categoryDept}
+                    onChange={(e) => setCategoryDept(e.target.value)}
+                  >
+                    <option value="All">All Departments</option>
+                    {metadata.departments.map((d) => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+                  <button
+                    data-testid="category-download-csv"
+                    className="secondary-btn"
+                    disabled={busy || categoryLoading}
+                    onClick={() => downloadReport(`/reports/assets-by-category?category=${encodeURIComponent(selectedCategory)}&department=${encodeURIComponent(categoryDept)}`, `assets_cat_${selectedCategory.toLowerCase()}`, "csv")}
+                  >
+                    <Download size={13} /> Export CSV
+                  </button>
+                  <button
+                    data-testid="category-download-pdf"
+                    className="primary-btn"
+                    disabled={busy || categoryLoading}
+                    onClick={() => downloadReport(`/reports/assets-by-category?category=${encodeURIComponent(selectedCategory)}&department=${encodeURIComponent(categoryDept)}`, `assets_cat_${selectedCategory.toLowerCase()}`, "pdf")}
+                  >
+                    <FileText size={13} /> Export PDF
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <ReportPreviewTable
+              headers={categoryData?.headers || []}
+              rows={categoryData?.rows || []}
+              total={categoryData?.total || 0}
+              loading={categoryLoading}
+              title={`Category Filter · ${selectedCategory} ${categoryDept !== "All" ? `(${categoryDept})` : "(Campus-Wide)"}`}
+              emptyMessage={`No assets categorized under "${selectedCategory}"`}
+            />
+          </div>
+        )}
+
+        {/* ============================================================
+            TAB 4: User Assets & Clearance
+            ============================================================ */}
+        {activeTab === "user" && (
+          <div style={{ display: "grid", gap: 16 }}>
+            <div className="report-controls-card">
+              <div className="report-filter-grid">
+                <div className="report-filter-item" style={{ flex: 2 }}>
+                  <label>Select User / Employee / Student</label>
+                  <select
+                    data-testid="report-user-select"
+                    value={selectedUserId}
+                    onChange={(e) => setSelectedUserId(e.target.value)}
+                  >
+                    {usersList.map((u) => (
+                      <option key={u.user_id} value={u.user_id}>
+                        {u.name} ({u.role} · {u.department || "No Dept"}) — {u.email}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {userAssetData && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    {userAssetData.total > 0 ? (
+                      <span className="status status-pending" data-testid="user-clearance-status">
+                        <i></i> PENDING RETURN ({userAssetData.total} ITEMS HELD)
+                      </span>
+                    ) : (
+                      <span className="status status-available" data-testid="user-clearance-status">
+                        <i></i> CLEARED (0 HELD ASSETS)
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+                  <button
+                    data-testid="user-download-csv"
+                    className="secondary-btn"
+                    disabled={busy || userLoading || !selectedUserId}
+                    onClick={() => downloadReport(`/reports/user-assets/${encodeURIComponent(selectedUserId)}`, `user_${selectedUserId}_assets`, "csv")}
+                  >
+                    <Download size={13} /> Export CSV
+                  </button>
+                  <button
+                    data-testid="user-download-pdf"
+                    className="primary-btn"
+                    disabled={busy || userLoading || !selectedUserId}
+                    onClick={() => downloadReport(`/reports/user-assets/${encodeURIComponent(selectedUserId)}`, `user_${selectedUserId}_clearance`, "pdf")}
+                  >
+                    <FileText size={13} /> Clearance Certificate PDF
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <ReportPreviewTable
+              headers={userAssetData?.headers || []}
+              rows={userAssetData?.rows || []}
+              total={userAssetData?.total || 0}
+              loading={userLoading}
+              title={`Personal Asset Holdings · ${userAssetData?.user?.name || selectedUserId}`}
+              emptyMessage="This user currently holds 0 active campus assets. Ready for No-Dues clearance."
+            />
+          </div>
+        )}
+
+        {/* ============================================================
+            TAB 5: Single Asset Lifecycle Report
+            ============================================================ */}
+        {activeTab === "single_asset" && (
+          <div style={{ display: "grid", gap: 20 }}>
+            <div className="report-controls-card">
+              <div className="asset-search-card">
+                <div className="asset-search-input">
+                  <Search size={15} />
+                  <input
+                    data-testid="report-asset-search"
+                    placeholder="Search asset by Tag, Name, or Serial Number…"
+                    value={assetSearch}
+                    onChange={(e) => setAssetSearch(e.target.value)}
+                  />
+                </div>
+
+                <div className="asset-chips-row">
+                  <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--mute)", textTransform: "uppercase" }}>Quick Pick:</span>
+                  {allAssets.slice(0, 5).map((a) => (
+                    <button
+                      key={a.asset_id}
+                      data-testid={`quick-asset-${a.tag}`}
+                      className={`asset-tag-chip ${selectedAssetId === a.asset_id ? "active" : ""}`}
+                      onClick={() => { setSelectedAssetId(a.asset_id); setAssetSearch(""); }}
+                    >
+                      {a.tag} · {a.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {filteredAssetSuggestions.length > 0 && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "10px 0", borderTop: "1px solid var(--hairline)" }}>
+                  <span style={{ fontSize: 11, color: "var(--mute)" }}>Matches:</span>
+                  {filteredAssetSuggestions.map((a) => (
+                    <button
+                      key={a.asset_id}
+                      className="link-btn"
+                      style={{ fontSize: 12, padding: "2px 8px", background: "var(--hairline-soft)", borderRadius: 4 }}
+                      onClick={() => { setSelectedAssetId(a.asset_id); setAssetSearch(""); }}
+                    >
+                      <b>{a.tag}</b> — {a.name} ({a.department})
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {assetLoading && (
+              <div className="loading" style={{ padding: 60 }}><RefreshCw size={24} className="animate-spin" /> Loading full asset lifecycle trace…</div>
+            )}
+
+            {!assetLoading && assetData && (
+              <div style={{ display: "grid", gap: 18 }} data-testid="single-asset-report-view">
+                {/* Hero Asset Profile Card */}
+                <div className="asset-hero-card">
+                  <div className="asset-hero-top">
+                    <div className="asset-hero-title">
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <span className="mono" style={{ fontSize: 13, fontWeight: 700, color: "var(--mute)" }}>{assetData.asset.tag}</span>
+                        <span className={`status status-${(assetData.asset.status || "").toLowerCase().replace(" ", "-")}`}>
+                          <i></i>{assetData.asset.status}
+                        </span>
+                        {assetData.asset.bookable && (
+                          <span className="template-chip" style={{ color: "var(--violet)", borderColor: "rgba(121,40,202,.3)" }}>Bookable</span>
+                        )}
+                      </div>
+                      <h2>{assetData.asset.name}</h2>
+                      <p className="muted" style={{ margin: 0 }}>
+                        {assetData.asset.category} · Located at {assetData.asset.location} · {assetData.asset.department}
+                      </p>
+                    </div>
+
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        data-testid="asset-download-csv"
+                        className="secondary-btn"
+                        disabled={busy}
+                        onClick={() => downloadReport(`/reports/asset/${selectedAssetId}`, `asset_${assetData.asset.tag}_lifecycle`, "csv")}
+                      >
+                        <Download size={13} /> Export Lifecycle CSV
+                      </button>
+                      <button
+                        data-testid="asset-download-pdf"
+                        className="primary-btn"
+                        disabled={busy}
+                        onClick={() => downloadReport(`/reports/asset/${selectedAssetId}`, `asset_${assetData.asset.tag}_lifecycle`, "pdf")}
+                      >
+                        <FileText size={13} /> Full Audit Report PDF
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 2x4 Key Specs */}
+                  <div className="asset-specs-grid">
+                    <div className="asset-spec-item">
+                      <small>Current Holder</small>
+                      <b>{assetData.asset.holder || "Unassigned"}</b>
+                    </div>
+                    <div className="asset-spec-item">
+                      <small>Serial Number</small>
+                      <b className="mono">{assetData.asset.serial || "—"}</b>
+                    </div>
+                    <div className="asset-spec-item">
+                      <small>Purchase Cost</small>
+                      <b>{assetData.asset.purchase_cost ? `Rs. ${Number(assetData.asset.purchase_cost).toLocaleString()}` : "—"}</b>
+                    </div>
+                    <div className="asset-spec-item">
+                      <small>Purchase Date</small>
+                      <b>{assetData.asset.purchase_date || "—"}</b>
+                    </div>
+                    <div className="asset-spec-item">
+                      <small>Supplier</small>
+                      <b>{assetData.asset.supplier || "—"}</b>
+                    </div>
+                    <div className="asset-spec-item">
+                      <small>Warranty End</small>
+                      <b>{assetData.asset.warranty_end || "—"}</b>
+                    </div>
+                  </div>
+
+                  {/* Lifecycle Stats Counters */}
+                  <div className="lifecycle-stats-row">
+                    <div className="lifecycle-stat">
+                      <span>{assetData.metrics?.total_events || 0}</span>
+                      <small>Activity Events</small>
+                    </div>
+                    <div className="lifecycle-stat">
+                      <span>{assetData.metrics?.total_maintenance || 0}</span>
+                      <small>Repair Orders</small>
+                    </div>
+                    <div className="lifecycle-stat">
+                      <span style={{ color: (assetData.metrics?.open_maintenance || 0) > 0 ? "var(--warning)" : "var(--success)" }}>
+                        {assetData.metrics?.open_maintenance || 0}
+                      </span>
+                      <small>Open Repairs</small>
+                    </div>
+                    <div className="lifecycle-stat">
+                      <span>{assetData.metrics?.total_bookings || 0}</span>
+                      <small>Reservations</small>
+                    </div>
+                    <div className="lifecycle-stat">
+                      <span>{assetData.metrics?.audit_verifications || 0}</span>
+                      <small>Physical Audits</small>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sub-tabs for detailed logs */}
+                <div className="surface" style={{ padding: 20 }}>
+                  <div style={{ display: "flex", gap: 6, marginBottom: 16, borderBottom: "1px solid var(--hairline)", paddingBottom: 10 }}>
+                    <button
+                      className={`report-tab-btn ${assetSubTab === "timeline" ? "active" : ""}`}
+                      onClick={() => setAssetSubTab("timeline")}
+                      data-testid="asset-subtab-timeline"
+                    >
+                      <Activity size={13} /> Activity Trail ({assetData.activity?.length || 0})
+                    </button>
+                    <button
+                      className={`report-tab-btn ${assetSubTab === "maintenance" ? "active" : ""}`}
+                      onClick={() => setAssetSubTab("maintenance")}
+                      data-testid="asset-subtab-maintenance"
+                    >
+                      <Wrench size={13} /> Maintenance Logs ({assetData.maintenance?.length || 0})
+                    </button>
+                    <button
+                      className={`report-tab-btn ${assetSubTab === "bookings" ? "active" : ""}`}
+                      onClick={() => setAssetSubTab("bookings")}
+                      data-testid="asset-subtab-bookings"
+                    >
+                      <Clock3 size={13} /> Booking Logs ({assetData.bookings?.length || 0})
+                    </button>
+                    <button
+                      className={`report-tab-btn ${assetSubTab === "audits" ? "active" : ""}`}
+                      onClick={() => setAssetSubTab("audits")}
+                      data-testid="asset-subtab-audits"
+                    >
+                      <ClipboardCheck size={13} /> Physical Audits ({assetData.audits?.length || 0})
+                    </button>
+                  </div>
+
+                  {assetSubTab === "timeline" && (
+                    <div>
+                      {(!assetData.activity || assetData.activity.length === 0) ? (
+                        <div className="report-table-empty">No activity events recorded for this asset yet.</div>
+                      ) : (
+                        <div className="lifecycle-timeline">
+                          {assetData.activity.map((ev, i) => (
+                            <div className="timeline-item" key={ev.event_id || i}>
+                              <div className={`timeline-dot ${i === 0 ? "active" : ""}`}></div>
+                              <div className="timeline-content">
+                                <div className="timeline-meta">
+                                  <span>{ev.timestamp ? new Date(ev.timestamp).toLocaleString() : "—"}</span>
+                                  <span className="template-chip">{ev.actor || "System"}</span>
+                                </div>
+                                <div className="timeline-action">{ev.action}</div>
+                                {ev.metadata && Object.keys(ev.metadata).length > 0 && (
+                                  <div className="timeline-details">
+                                    {Object.entries(ev.metadata).map(([k, v]) => `${k}: ${v}`).join(" · ")}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {assetSubTab === "maintenance" && (
+                    <ReportPreviewTable
+                      headers={["Request ID", "Priority", "Status", "Description", "Raised By", "Created", "Resolved"]}
+                      rows={(assetData.maintenance || []).map((m) => [
+                        m.request_id || "",
+                        m.priority || "Medium",
+                        m.status || "Open",
+                        m.description || "—",
+                        m.raised_by || "—",
+                        (m.created_at || "").slice(0, 10),
+                        (m.resolved_at || "—").slice(0, 10)
+                      ])}
+                      total={assetData.maintenance?.length || 0}
+                      title="Maintenance & Work Orders"
+                      emptyMessage="No maintenance or repair work orders logged for this asset"
+                    />
+                  )}
+
+                  {assetSubTab === "bookings" && (
+                    <ReportPreviewTable
+                      headers={["Booking ID", "Date", "Slot", "Event / Purpose", "Requested By", "Status"]}
+                      rows={(assetData.bookings || []).map((b) => [
+                        b.booking_id || "",
+                        b.date || "",
+                        `${b.start_time || ""} - ${b.end_time || ""}`,
+                        b.event_title || b.purpose || "—",
+                        b.requested_by || "—",
+                        b.status || "Confirmed"
+                      ])}
+                      total={assetData.bookings?.length || 0}
+                      title="Room / Resource Booking History"
+                      emptyMessage="No reservations recorded for this asset"
+                    />
+                  )}
+
+                  {assetSubTab === "audits" && (
+                    <ReportPreviewTable
+                      headers={["Audit ID", "Department", "Period", "Verification", "Auditor Notes", "Status"]}
+                      rows={(assetData.audits || []).flatMap((a) =>
+                        (a.items || [])
+                          .filter((it) => it.asset_id === assetData.asset.asset_id || it.tag === assetData.asset.tag)
+                          .map((it) => [
+                            a.audit_id || "",
+                            a.department || "",
+                            a.period || "",
+                            it.verification || "Pending",
+                            it.note || "—",
+                            a.status || ""
+                          ])
+                      )}
+                      total={(assetData.audits || []).length}
+                      title="Physical Audit Cycle Verification Log"
+                      emptyMessage="No physical audit cycles recorded for this asset yet"
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ============================================================
+            TAB 6: Custom Reports (Admin Template Builder)
+            ============================================================ */}
+        {activeTab === "custom" && (
+          <div style={{ display: "grid", gap: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+              <div>
+                <h3 style={{ margin: "0 0 4px", fontSize: 18 }}>Custom Report Templates</h3>
+                <p className="muted" style={{ margin: 0 }}>
+                  Pre-configured data extractions published by campus administrators.
+                </p>
+              </div>
+
+              {currentUser?.role === "Admin" && (
+                <button
+                  data-testid="create-template-btn"
+                  className="primary-btn"
+                  onClick={() => { setEditingTemplate(null); setBuilderOpen(true); }}
+                >
+                  <Plus size={14} /> Create Report Template
+                </button>
+              )}
+            </div>
+
+            {templatesLoading ? (
+              <div className="loading" style={{ padding: 40 }}><RefreshCw size={20} className="animate-spin" /> Loading custom templates…</div>
+            ) : templates.length === 0 ? (
+              <div className="surface report-table-empty">
+                <SlidersHorizontal size={28} style={{ opacity: 0.4, margin: "0 auto 12px", display: "block" }} />
+                <b>No custom report templates available</b>
+                <p style={{ margin: "6px 0 0", color: "var(--mute)", fontSize: 13 }}>
+                  {currentUser?.role === "Admin"
+                    ? "Click '+ Create Report Template' to design your first custom report."
+                    : "Your administrator has not published any templates for your role yet."}
+                </p>
+              </div>
+            ) : (
+              <div className="template-grid" data-testid="custom-templates-grid">
+                {templates.map((tmpl) => {
+                  const isExpanded = expandedPreviewId === tmpl.template_id;
+                  const preview = templatePreviews[tmpl.template_id];
+                  const sourceClass = (tmpl.data_source || "assets").toLowerCase();
+
+                  return (
+                    <div className="template-card" key={tmpl.template_id} data-testid={`template-card-${tmpl.template_id}`}>
+                      <div className="template-card-top">
+                        <div>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                            <span className={`template-badge ${sourceClass}`}>
+                              {tmpl.data_source}
+                            </span>
+                            <span className="mono" style={{ fontSize: 11, color: "var(--mute)" }}>{tmpl.template_id}</span>
+                          </div>
+                          <h4>{tmpl.name}</h4>
+                          <p>{tmpl.description || "No description provided."}</p>
+                        </div>
+
+                        {currentUser?.role === "Admin" && (
+                          <div style={{ display: "flex", gap: 4 }}>
+                            <button
+                              className="icon-btn"
+                              style={{ width: 28, height: 28 }}
+                              title="Edit template"
+                              onClick={() => { setEditingTemplate(tmpl); setBuilderOpen(true); }}
+                              data-testid={`edit-template-${tmpl.template_id}`}
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              className="icon-btn"
+                              style={{ width: 28, height: 28, color: "var(--error)" }}
+                              title="Delete template"
+                              onClick={() => handleDeleteTemplate(tmpl.template_id, tmpl.name)}
+                              data-testid={`delete-template-${tmpl.template_id}`}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Meta chips */}
+                      <div className="template-meta-row">
+                        <span className="template-chip">{tmpl.columns?.length || 0} columns</span>
+                        {tmpl.filters && Object.keys(tmpl.filters).length > 0 && (
+                          <span className="template-chip">
+                            Filters: {Object.entries(tmpl.filters).map(([k, v]) => `${k}=${v}`).join(", ")}
+                          </span>
+                        )}
+                        {tmpl.sort_by && (
+                          <span className="template-chip">Sort: {tmpl.sort_by} ({tmpl.sort_order || "asc"})</span>
+                        )}
+                      </div>
+
+                      <div className="template-meta-row">
+                        <span style={{ fontSize: 11, color: "var(--mute)" }}>Audience:</span>
+                        {(tmpl.access_roles || ["Admin"]).map((r) => (
+                          <span key={r} className="template-chip" style={{ fontSize: 10 }}>{r}</span>
+                        ))}
+                      </div>
+
+                      {/* Actions */}
+                      <div className="template-card-footer">
+                        <span className="template-author">
+                          By {tmpl.created_by_name || "Admin"} · {fmtRelative(tmpl.created_at)}
+                        </span>
+
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button
+                            data-testid={`template-preview-btn-${tmpl.template_id}`}
+                            className="secondary-btn compact"
+                            onClick={() => toggleTemplatePreview(tmpl.template_id)}
+                          >
+                            <Eye size={12} /> {isExpanded ? "Hide" : "Preview"}
+                          </button>
+                          <button
+                            data-testid={`template-download-csv-${tmpl.template_id}`}
+                            className="secondary-btn compact"
+                            disabled={busy}
+                            onClick={() => downloadReport(`/reports/templates/${tmpl.template_id}/download`, tmpl.name, "csv")}
+                          >
+                            <Download size={12} /> CSV
+                          </button>
+                          <button
+                            data-testid={`template-download-pdf-${tmpl.template_id}`}
+                            className="primary-btn compact"
+                            disabled={busy}
+                            onClick={() => downloadReport(`/reports/templates/${tmpl.template_id}/download`, tmpl.name, "pdf")}
+                          >
+                            <FileText size={12} /> PDF
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Inline Expanded Preview */}
+                      {isExpanded && (
+                        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px dashed var(--hairline)" }}>
+                          {preview ? (
+                            <ReportPreviewTable
+                              headers={preview.headers}
+                              rows={preview.preview_rows}
+                              total={preview.total}
+                              title={`${tmpl.name} (First 20 records)`}
+                            />
+                          ) : (
+                            <div className="loading" style={{ padding: 20 }}><RefreshCw size={14} className="animate-spin" /> Loading preview data…</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ============================================================
+            TAB 7: Accreditation Evidence & Department Utilization
+            ============================================================ */}
+        {activeTab === "accreditation" && (
+          <div style={{ display: "grid", gap: 20 }}>
+            {/* Accreditation Global Card */}
+            <section className="surface" data-testid="accreditation-report-card">
+              <div className="section-title">
+                <div>
+                  <p className="eyebrow">GLOBAL AUDIT & ACCREDITATION</p>
+                  <h3>NAAC / NBA Accreditation Evidence Extract</h3>
+                  <p className="muted" style={{ margin: "4px 0 0" }}>
+                    Official institutional inventory summary file including asset counts, departmental distributions, and maintenance metrics.
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    data-testid="accreditation-csv-btn"
+                    className="secondary-btn"
+                    disabled={busy}
+                    onClick={() => downloadReport("/reports/accreditation/download", "assetflow_accreditation", "csv")}
+                  >
+                    <Download size={13} /> Export CSV
+                  </button>
+                  <button
+                    data-testid="accreditation-pdf-btn"
+                    className="primary-btn"
+                    disabled={busy}
+                    onClick={() => downloadReport("/reports/accreditation/download", "assetflow_accreditation", "pdf")}
+                  >
+                    <FileText size={13} /> Export PDF
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            {/* Department Utilization Bar Charts (Preserved from existing design) */}
+            {overviewData && (
+              <section className="surface report-table" data-testid="utilization-by-dept-section">
+                <div className="section-title">
+                  <div>
+                    <p className="eyebrow">UTILIZATION BY DEPARTMENT</p>
+                    <h3>Where resources are allocated across campus</h3>
+                  </div>
+                </div>
+                {overviewData.departments.map((x) => {
+                  const pct = x.total ? Math.round((x.allocated / x.total) * 100) : 0;
+                  return (
+                    <div data-testid="report-department-row" className="report-row" key={x.name}>
+                      <div>
+                        <b>{x.name}</b>
+                        <small>{x.allocated} of {x.total} assets currently allocated</small>
+                      </div>
+                      <div className="progress"><span style={{ width: `${pct}%` }} /></div>
+                      <strong>{pct}%</strong>
+                    </div>
+                  );
+                })}
+              </section>
+            )}
+          </div>
+        )}
       </section>
+
+      {/* Admin Report Builder Modal */}
+      {builderOpen && (
+        <ReportTemplateBuilderModal
+          template={editingTemplate}
+          onClose={() => { setBuilderOpen(false); setEditingTemplate(null); }}
+          onSaved={() => { loadTemplates(); }}
+        />
+      )}
     </>
   );
 }
+
 
 function pad2(n) { return String(n).padStart(2, "0"); }
 function dayISO(offset) {

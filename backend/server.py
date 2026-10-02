@@ -1155,6 +1155,30 @@ def build_single_asset_csv(asset: dict, events: list, maints: list, bks: list, a
     buf.seek(0)
     return buf.getvalue()
 
+# --- Reports Metadata & User List Helpers ---
+@api.get("/reports/metadata")
+async def report_metadata(user=Depends(require_permission("reports"))):
+    depts = [d["name"] for d in await db.departments.find({}, {"_id": 0, "name": 1}).sort("name", 1).to_list(100)]
+    cats = [c["name"] for c in await db.categories.find({}, {"_id": 0, "name": 1}).sort("name", 1).to_list(100)]
+    if not depts:
+        depts = await db.assets.distinct("department")
+    if not cats:
+        cats = await db.assets.distinct("category")
+    statuses = ["Available", "Allocated", "Under Maintenance", "Lost", "Retired"]
+    return {
+        "departments": sorted(list(set(depts))),
+        "categories": sorted(list(set(cats))),
+        "statuses": statuses
+    }
+
+@api.get("/reports/users")
+async def report_users_list(user=Depends(require_permission("reports"))):
+    return [clean(x) for x in await db.users.find({"status": "Active"}, {"_id": 0, "user_id": 1, "name": 1, "email": 1, "department": 1, "role": 1}).sort("name", 1).to_list(300)]
+
+@api.get("/reports/templates/sources")
+async def report_template_sources(user=Depends(require_permission("reports"))):
+    return [{"key": k, "label": v.get("label", k.title())} for k, v in DATA_SOURCES_SCHEMA.items()]
+
 # --- 1. Department Asset Register ---
 @api.get("/reports/department/{dept}/assets")
 async def report_department_assets(dept: str, format: str = "csv", user=Depends(require_permission("reports"))):
