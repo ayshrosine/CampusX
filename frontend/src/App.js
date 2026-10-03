@@ -8,7 +8,7 @@ import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import OrbitTrails from "@/components/OrbitTrails";
 import "@/App.css";
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = `${process.env.REACT_APP_BACKEND_URL || ""}/api`;
 
 const api = async (path, options = {}) => {
   const res = await fetch(`${API}${path}`, {
