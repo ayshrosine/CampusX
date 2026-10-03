@@ -2974,6 +2974,7 @@ function Admin() {
       <BrandingPanel />
       <DelegationsPanel users={users} />
       <BulkImportPanel />
+      <DemoSeedPanel reload={load} />
     </>
   );
 }
@@ -3305,6 +3306,62 @@ function BulkImportPanel() {
               <small>{r.message || r.name || r.asset_id || r.user_id || ""}</small>
             </div>
           ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DemoSeedPanel({ reload }) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const triggerSeed = async () => {
+    if (!window.confirm("This will refresh and reset the complete campus demo dataset (260 assets, work orders, bookings, audits, no-dues, activities). Continue?")) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const res = await api("/admin/seed", { method: "POST" });
+      setResult(res);
+      toast.success("Comprehensive demo seed data restored!");
+      if (reload) reload();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="surface" data-testid="demo-seed-panel" style={{ marginTop: 16 }}>
+      <div className="section-title">
+        <div>
+          <p className="eyebrow">DEMO & ACCREDITATION DATASET</p>
+          <h3>Seed Data Management</h3>
+        </div>
+      </div>
+      <p className="muted" style={{ margin: "4px 0 14px", fontSize: 13 }}>
+        Populates 260 realistic campus assets spanning 10 categories, 15 departments, and all operational conditions (Available, Allocated, Under Maintenance, Lost, Retired), plus 50 maintenance tickets, 45 calendar bookings, 12 audits, 35 student no-dues clearances, and 300 audit logs.
+      </p>
+      <button
+        data-testid="trigger-seed-button"
+        className="primary-btn compact"
+        disabled={busy}
+        onClick={triggerSeed}
+      >
+        <RefreshCw size={13} className={busy ? "animate-spin" : ""} /> {busy ? "Repopulating 260+ Records…" : "Reset & Repopulate Full Demo Dataset"}
+      </button>
+      {result && (
+        <div className="bulk-result" style={{ marginTop: 12 }}>
+          <p className="eyebrow">Dataset Summary ({result.message})</p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 8, marginTop: 8 }}>
+            {Object.entries(result.counts || {}).map(([k, v]) => (
+              <div key={k} style={{ padding: "6px 10px", background: "var(--surface)", border: "1px solid var(--hairline)", borderRadius: 6 }}>
+                <small style={{ textTransform: "capitalize", color: "var(--mute)" }}>{k}</small>
+                <div style={{ font: "600 15px var(--font-mono)", color: "var(--link)" }}>{v}</div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </section>

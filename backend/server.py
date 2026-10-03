@@ -343,7 +343,7 @@ async def assets(search: str = "", status: str = "All", category: str = "All", u
     if search: query["$or"]=[{"name":{"$regex":search,"$options":"i"}},{"tag":{"$regex":search,"$options":"i"}},{"serial":{"$regex":search,"$options":"i"}}]
     if status != "All": query["status"] = status
     if category != "All": query["category"] = category
-    return [clean(x) for x in await db.assets.find(query, {"_id":0}).sort("updated_at", -1).to_list(200)]
+    return [clean(x) for x in await db.assets.find(query, {"_id":0}).sort("updated_at", -1).to_list(1000)]
 
 @api.post("/assets")
 async def create_asset(payload: AssetCreate, user=Depends(current_user)):
@@ -382,7 +382,7 @@ async def maintenance(user=Depends(current_user)):
     purged = await db.maintenance.delete_many({"status": "Resolved", "resolved_at": {"$lt": cutoff}})
     if purged.deleted_count:
         await db.activity.insert_one({"event_id": f"evt_{uuid.uuid4().hex[:12]}","actor_id":"system","actor":"AssetFlow System","action":f"auto-expired {purged.deleted_count} resolved requests (30d)","entity_type":"maintenance","entity_id":"batch","before":None,"after":None,"metadata":{"purged":purged.deleted_count},"timestamp": now_iso()})
-    return [clean(x) for x in await db.maintenance.find({}, {"_id":0}).sort("created_at",-1).to_list(200)]
+    return [clean(x) for x in await db.maintenance.find({}, {"_id":0}).sort("created_at",-1).to_list(500)]
 
 @api.post("/maintenance")
 async def create_maintenance(payload: MaintenanceCreate, user=Depends(require_permission("maintenance_write"))):
@@ -413,11 +413,11 @@ async def delete_maintenance(request_id: str, user=Depends(require_permission("m
     await log_event(user,"maintenance request removed","maintenance",request_id,before=before); return {"ok": True}
 
 @api.get("/activity")
-async def activity(user=Depends(current_user)): return [clean(x) for x in await db.activity.find({}, {"_id":0}).sort("timestamp",-1).to_list(200)]
+async def activity(user=Depends(current_user)): return [clean(x) for x in await db.activity.find({}, {"_id":0}).sort("timestamp",-1).to_list(500)]
 
 @api.get("/reports")
 async def reports(user=Depends(require_permission("reports"))):
-    assets=[clean(x) for x in await db.assets.find({}, {"_id":0}).to_list(500)]; by_dept={}
+    assets=[clean(x) for x in await db.assets.find({}, {"_id":0}).to_list(1500)]; by_dept={}
     for a in assets: by_dept.setdefault(a["department"],{"name":a["department"],"total":0,"allocated":0}); by_dept[a["department"]]["total"]+=1; by_dept[a["department"]]["allocated"]+=a["status"]=="Allocated"
     return {"departments":list(by_dept.values()),"status_counts":{s:sum(a["status"]==s for a in assets) for s in ["Available","Allocated","Under Maintenance","Lost","Retired"]},"total":len(assets)}
 
@@ -441,7 +441,7 @@ async def create_category(payload: CategoryCreate, user=Depends(require_permissi
 
 @api.get("/admin/users")
 async def get_admin_users(user=Depends(require_permission("admin"))):
-    return [{k: v for k, v in clean(x).items() if k != "password_hash"} for x in await db.users.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)]
+    return [{k: v for k, v in clean(x).items() if k != "password_hash"} for x in await db.users.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)]
 
 @api.patch("/admin/users/{user_id}/role")
 async def change_role(user_id: str, payload: RoleChange, user=Depends(require_permission("admin"))):
@@ -493,7 +493,7 @@ async def global_search(q: str = "", user=Depends(current_user)):
 @api.get("/bookings")
 async def get_bookings(date: str = "", user=Depends(current_user)):
     query = {"date": date} if date else {}
-    return [clean(x) for x in await db.bookings.find(query, {"_id": 0}).sort([("date", 1), ("start_time", 1)]).to_list(200)]
+    return [clean(x) for x in await db.bookings.find(query, {"_id": 0}).sort([("date", 1), ("start_time", 1)]).to_list(500)]
 
 @api.post("/bookings")
 async def create_booking(payload: BookingCreate, user=Depends(require_permission("booking"))):
@@ -511,7 +511,7 @@ async def delete_booking(booking_id: str, user=Depends(require_permission("booki
 
 @api.get("/audits")
 async def get_audits(user=Depends(require_permission("audit"))):
-    return [clean(x) for x in await db.audits.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)]
+    return [clean(x) for x in await db.audits.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)]
 
 @api.post("/audits")
 async def create_audit(payload: AuditCreate, user=Depends(require_permission("audit"))):
@@ -537,7 +537,7 @@ async def close_audit(audit_id: str, user=Depends(require_permission("audit"))):
 
 @api.get("/nodues")
 async def get_nodues(user=Depends(require_permission("nodues"))):
-    return [clean(x) for x in await db.nodues.find({}, {"_id": 0}).sort("student_name", 1).to_list(200)]
+    return [clean(x) for x in await db.nodues.find({}, {"_id": 0}).sort("student_name", 1).to_list(500)]
 
 @api.patch("/nodues/{student_id}/{department}")
 async def update_nodues(student_id: str, department: str, payload: NoDuesUpdate, user=Depends(require_permission("nodues"))):
@@ -1500,7 +1500,7 @@ async def report_metadata(user=Depends(require_permission("reports"))):
 
 @api.get("/reports/users")
 async def report_users_list(user=Depends(require_permission("reports"))):
-    users = [clean(u) for u in await db.users.find({}, {"_id": 0, "password_hash": 0}).sort("name", 1).to_list(200)]
+    users = [clean(u) for u in await db.users.find({}, {"_id": 0, "password_hash": 0}).sort("name", 1).to_list(500)]
     return users
 
 @api.get("/reports/templates/sources")
@@ -2130,11 +2130,46 @@ async def ensure_demo_data():
     except Exception as e:
         logger.warning(f"ensure_demo_data skipped: {e}")
 
+@api.post("/admin/seed")
+async def trigger_admin_seed(user=Depends(require_permission("admin"))):
+    try:
+        from seed_data import run_seed
+        await run_seed(drop_existing=True)
+        return {
+            "ok": True,
+            "message": "Comprehensive seed data (260 assets, work orders, bookings, audits, no-dues, activities) successfully refreshed",
+            "counts": {
+                "assets": await db.assets.count_documents({}),
+                "maintenance": await db.maintenance.count_documents({}),
+                "bookings": await db.bookings.count_documents({}),
+                "audits": await db.audits.count_documents({}),
+                "nodues": await db.nodues.count_documents({}),
+                "activity": await db.activity.count_documents({}),
+                "users": await db.users.count_documents({}),
+                "departments": await db.departments.count_documents({}),
+                "categories": await db.categories.count_documents({}),
+                "templates": await db.report_templates.count_documents({}),
+                "delegations": await db.delegations.count_documents({})
+            }
+        }
+    except Exception as e:
+        logger.error(f"Admin seed failed: {e}")
+        raise HTTPException(500, f"Seeding failed: {str(e)}")
+
 @app.on_event("startup")
 async def startup():
-    await seed()
-    await ensure_supporting_seed()
-    await ensure_demo_data()
+    if await db.assets.count_documents({}) < 50:
+        try:
+            from seed_data import run_seed
+            await run_seed(drop_existing=False)
+        except Exception as e:
+            logger.warning(f"seed_data run_seed fallback: {e}")
+            await seed()
+            await ensure_supporting_seed()
+            await ensure_demo_data()
+    else:
+        await ensure_supporting_seed()
+        await ensure_demo_data()
 @app.on_event("shutdown")
 async def shutdown(): client.close()
 app.include_router(api)

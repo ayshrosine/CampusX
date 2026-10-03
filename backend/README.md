@@ -520,12 +520,28 @@ The backend uses the following key libraries (see `requirements.txt` for full li
 
 ## Seeding
 
-An idempotent `seed()` function runs on backend startup that:
+A comprehensive, realistic demo dataset is provided in `backend/seed_data.py` (and automatically invoked on backend startup if the database has fewer than 50 assets):
 
-- Creates demo admin and asset manager accounts
-- Sets up sample departments and categories
-- Creates sample assets for testing
-- Initializes no-dues clearance data
-- Configures default branding settings
+- **260 Assets**: Spanning 10 categories, 15 campus departments, and all operational statuses (`Available`, `Allocated`, `Under Maintenance`, `Lost`, `Retired`), bookable equipment and facilities, financial records, warranties, and suppliers.
+- **50 Maintenance Requests**: Spanning `Pending`, `Approved`, `In progress`, `Resolved`, and `Rejected` statuses across `High`, `Medium`, and `Low` priorities.
+- **45 Bookings**: Past history, today's schedule, and upcoming 7-day calendar reservations for rooms, buses, laptops, projectors, and labs.
+- **12 Audit Cycles**: 5 Open cycles and 7 Closed cycles with item verifications (`Verified`, `Missing`, `Damaged`, `Pending`) and photo evidence.
+- **35 Student No-Dues Clearances**: Clearances across Library, Hostel, Sports, Laboratory, and Accounts (`Cleared`, `In progress`, `Pending`).
+- **300 Activity Logs**: Full 30-day chronological audit trail across alerts, approvals, bookings, and asset mutations.
+- **28 Demo Users**: Across `Admin`, `Asset Manager`, `HOD`, `Employee`, and `Student` roles.
+- **15 Campus Departments & 10 Asset Categories**.
+- **8 Custom Report Templates & 6 Administrative Delegations**.
 
-The seed function only creates data if it doesn't already exist, making it safe to run multiple times.
+### Running the Seed Script Manually
+
+```bash
+cd backend
+python seed_data.py
+```
+
+To preserve existing data without dropping:
+```bash
+python seed_data.py --keep
+```
+
+An admin can also trigger a complete seed refresh directly via `POST /api/admin/seed` or from the Admin Console UI.
