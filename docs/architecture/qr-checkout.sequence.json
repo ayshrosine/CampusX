@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "QR Scan Asset Allocation Sequence",
+    "output": "docs/architecture/qr-checkout.html",
+    "viewBox": [1080, 680],
+    "column_fit": "spread",
+    "animation": "trace",
+    "quality_profile": "showcase"
+  },
+  "participants": [
+    { "id": "custodian", "type": "external", "label": "Custodian", "sublabel": "Field Staff PWA" },
+    { "id": "web", "type": "frontend", "label": "React UI", "sublabel": "/scan & Detail" },
+    { "id": "api", "type": "backend", "label": "FastAPI", "sublabel": "server.py :8001" },
+    { "id": "rbac", "type": "security", "label": "RBAC Engine", "sublabel": "asset_write guard" },
+    { "id": "mongo", "type": "database", "label": "MongoDB", "sublabel": "assets collection" },
+    { "id": "audit", "type": "messagebus", "label": "Activity Log", "sublabel": "log_event() sink" }
+  ],
+  "segments": [
+    { "from": 150, "to": 320, "label": "QR Tag Lookup & Authentication" },
+    { "from": 330, "to": 440, "label": "Availability & Allocation Mutation" },
+    { "from": 450, "to": 535, "label": "Audit Side Effect & Confirmation" }
+  ],
+  "messages": [
+    { "id": "scan-qr", "from": "custodian", "to": "web", "y": 160, "label": "scan camera QR tag", "variant": "default" },
+    { "id": "get-tag", "from": "web", "to": "api", "y": 190, "label": "GET /api/assets/by-tag/{tag}", "variant": "emphasis" },
+    { "id": "verify-perm", "from": "api", "to": "rbac", "y": 220, "label": "validate session & role", "variant": "security" },
+    { "id": "perm-ok", "from": "rbac", "to": "api", "y": 250, "label": "authorized (asset_write)", "variant": "return" },
+    { "id": "find-asset", "from": "api", "to": "mongo", "y": 280, "label": "find_one({'tag': tag})", "variant": "default" },
+    { "id": "asset-data", "from": "mongo", "to": "api", "y": 310, "label": "asset doc (UUID, Available)", "variant": "return" },
+    { "id": "post-checkout", "from": "web", "to": "api", "y": 340, "label": "POST /assets/{id}/checkout", "variant": "emphasis" },
+    { "id": "check-available", "from": "api", "to": "mongo", "y": 370, "label": "verify status == Available", "variant": "default" },
+    { "id": "conflict-fallback", "from": "mongo", "to": "api", "y": 400, "label": "fallback: 400 if already Allocated", "variant": "return" },
+    { "id": "mutate-alloc", "from": "api", "to": "mongo", "y": 430, "label": "update status=Allocated, holder", "variant": "emphasis" },
+    { "id": "async-audit", "from": "api", "to": "audit", "y": 460, "label": "log_event(asset_checkout)", "variant": "dashed" },
+    { "id": "checkout-ok", "from": "api", "to": "web", "y": 490, "label": "200 OK {status: Allocated}", "variant": "return" },
+    { "id": "ui-feedback", "from": "web", "to": "custodian", "y": 520, "label": "render success badge + toast", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "web", "from": 160, "to": 525, "type": "frontend" },
+    { "participant": "api", "from": 185, "to": 495, "type": "backend" },
+    { "participant": "rbac", "from": 215, "to": 255, "type": "security" },
+    { "participant": "mongo", "from": 275, "to": 435, "type": "database" },
+    { "participant": "audit", "from": 455, "to": 475, "type": "messagebus" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Primary Flow",
+      "items": [
+        "Custodian scans physical QR code via mobile camera",
+        "FastAPI validates session cookie and asset_write permissions",
+        "Asset status transitions atomically to Allocated"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Conflict & Fallback Guard",
+      "items": [
+        "If asset is already checked out or under maintenance, API rejects checkout with 400",
+        "No race conditions: status verification precedes mutation"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "Immutable Audit Side Effect",
+      "items": [
+        "Mutation emits structured activity event with actor, timestamp, and delta",
+        "Audit logging is non-blocking to keep user UI response immediate"
+      ]
+    }
+  ]
+}

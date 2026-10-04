@@ -1,547 +1,275 @@
-# AssetFlow Campus — Backend
+# AssetFlow Campus — Backend Service
 
-A **FastAPI** service (Python 3.11) backed by **MongoDB** (via the async **Motor**
-driver). It exposes a JSON API under the `/api` prefix, enforces cookie-based
-authentication and server-side role-based access control (RBAC), and integrates
-Cloudinary (uploads), ReportLab (PDF), and Web Push (VAPID).
+A high-performance asynchronous **FastAPI** service (Python 3.11) backed by **MongoDB Atlas** via the async **Motor** driver. It provides a RESTful JSON API under the `/api` prefix, enforces HTTP-only cookie-based session authentication and server-side Role-Based Access Control (RBAC), and manages integrations with Cloudinary (signed photo uploads), ReportLab (compliance PDF generation), and Web Push (VAPID push notifications).
 
 ---
 
 ## 📋 Table of Contents
 
-- [Architecture Overview](#architecture-overview)
-- [Authentication](#authentication)
+- [Architecture & Design Decisions](#architecture--design-decisions)
+- [Archify Architecture Specifications](#archify-architecture-specifications)
+- [Directory Layout](#directory-layout)
+- [Authentication & Session Lifecycle](#authentication--session-lifecycle)
 - [Roles & Permissions (RBAC)](#roles--permissions-rbac)
-- [API Endpoints](#api-endpoints)
-- [Data Model](#data-model)
-- [Local Development Setup](#local-development-setup)
-- [External Services Configuration](#external-services-configuration)
-- [Environment Variables](#environment-variables)
-- [Integrations](#integrations)
-- [Testing](#testing)
+- [API Endpoints Reference](#api-endpoints-reference)
+- [Data Model & MongoDB Collections](#data-model--mongodb-collections)
+- [Demo Dataset & Seeding](#demo-dataset--seeding)
+- [External Integrations](#external-integrations)
+- [Local Setup & Development](#local-setup--development)
+- [Testing & Quality Assurance](#testing--quality-assurance)
 - [Deployment](#deployment)
-- [Troubleshooting](#troubleshooting)
+- [Troubleshooting & FAQ](#troubleshooting--faq)
 
 ---
 
-## 1. Architecture Overview
+## 🏛 Architecture & Design Decisions
 
 ```
-Client (React SPA)
-   │  fetch  https://<backend>/api/...   (withCredentials → session_token cookie)
+Client (React SPA / Mobile PWA)
+   │  fetch https://<host>/api/... (withCredentials: true ➔ session_token cookie)
    ▼
-FastAPI app  (server.py)
-   ├── APIRouter(prefix="/api")            # every route is /api/*
-   ├── current_user  dependency           # validates session cookie/Bearer token
-   ├── require_permission(perm) dependency # RBAC gate → 403 if not allowed
-   ├── log_event()                         # writes to `activity` audit log
-   ├── Integrations: Cloudinary · ReportLab · pywebpush
-   └── startup: idempotent seed()
+FastAPI Application (server.py)
+   ├── APIRouter(prefix="/api")             # All application routes prefixed with /api
+   ├── current_user dependency              # Validates session cookie or Bearer token
+   ├── require_permission(perm) dependency  # Server-side RBAC guard ➔ 403 on forbidden
+   ├── log_event()                          # Writes immutable records to `activity` log
+   ├── Integrations Engine                  # Cloudinary, ReportLab, pywebpush
+   └── Seed Data Runner                     # Automatic initialization of realistic campus data
    ▼
-MongoDB (Motor, async)  — DB name from env DB_NAME
+MongoDB Atlas (Async Motor Driver)          # Database collections (UUID primary keys)
 ```
 
-- **Single-file design:** `server.py` (~875 lines) contains Pydantic models, helpers,
-  RBAC tables, all route handlers, integration code and the seed routine.
-- **IDs:** all documents use string **UUIDs** (`user_id`, `asset_id`, …). MongoDB
-  `_id` is stripped from every response via `clean()` (never exposed).
-- **CORS:** driven by `CORS_ORIGINS` env; cookies are `SameSite=None; Secure; HttpOnly`.
-- Runs on **0.0.0.0:8001** under Supervisor; Kubernetes ingress maps `/api` here.
+- **UUID Primary Keys**: All entities use domain-prefixed string UUIDs (e.g. `ast_...`, `user_...`, `req_...`, `bk_...`). MongoDB internal `_id` values are stripped from API outputs via the `clean()` helper to prevent schema leakage.
+- **Strict Pydantic Validation**: Models enforce length constraints and disallow whitespace-only strings via field validators.
+- **Dynamic Admin Delegation**: Supports scheduled, time-windowed delegation slots allowing administrators to elevate deputies temporarily.
+- **Audit Logging by Design**: Every state-altering endpoint invokes `log_event()` to maintain a permanent chronological trail in the `activity` collection.
 
 ---
 
-## 2. Authentication
+## 📐 Archify Architecture Specifications
 
-- **Sessions:** `create_session()` issues a random `secrets.token_urlsafe(32)` token
-  stored in `user_sessions` with a 7-day expiry; returned as an httpOnly cookie.
-- **`current_user`** reads the cookie (or `Authorization: Bearer`), validates the
-  session + expiry, loads the user, and applies any **active delegation** (see RBAC).
-- **Password auth:** `bcrypt` hashing (`bcrypt.hashpw` / `checkpw`); passwords are
-  never returned (`password_hash` filtered out).
-- **Google OAuth:** `POST /api/auth/session` exchanges an Emergent-managed
-  `X-Session-ID` (validated against `demobackend.emergentagent.com`) for a local
-  session. New Google users are created as **Student / Pending**.
+The system's architectural layers and behaviors are formalized in the root `docs/architecture/` suite:
+
+1. **[System Architecture](file:///d:/projects/CampusX/docs/architecture/system-architecture.html)** (`system-architecture.architecture.json`): Maps the 8–12 core components across Client, Application, and Cloud boundaries.
+2. **[Maintenance Workflow](file:///d:/projects/CampusX/docs/architecture/maintenance-workflow.html)** (`maintenance-workflow.workflow.json`): Models triage, approval gates, technician evidence upload, and 30-day auto-expiry.
+3. **[QR Checkout Sequence](file:///d:/projects/CampusX/docs/architecture/qr-checkout.html)** (`qr-checkout.sequence.json`): Traces the field scan, RBAC check, atomic status mutation, and non-blocking audit side effect.
+4. **[Asset Dataflow](file:///d:/projects/CampusX/docs/architecture/asset-dataflow.html)** (`asset-dataflow.dataflow.json`): Details the 5-stage data journey from ingestion to NAAC/NBA accreditation reports.
+5. **[Asset Lifecycle](file:///d:/projects/CampusX/docs/architecture/asset-lifecycle.html)** (`asset-lifecycle.lifecycle.json`): Full operational state machine separating active, waiting, recovery, and terminal states.
 
 ---
 
-## 3. Roles & Permissions (RBAC)
+## 📁 Directory Layout
+
+```
+backend/
+├── server.py             # Main FastAPI service: routes, models, RBAC, and integrations
+├── seed_data.py          # Standalone seed script generating 260 assets and campus records
+├── requirements.txt      # Python dependencies
+├── pytest.ini            # Pytest execution configuration
+├── .env.example          # Environment variable template
+├── .env                  # Local secret configuration (git-ignored)
+└── tests/                # Automated test suite
+    ├── test_assetflow_api.py # Core API and RBAC test suite
+    └── test_new_features.py  # Validation for push notifications, QR, and digest
+```
+
+---
+
+## 🔐 Authentication & Session Lifecycle
+
+- **Session Cookies**: Upon successful login, the server generates a cryptographically secure random token (`secrets.token_urlsafe(32)`), persists it in `user_sessions` with a 7-day TTL, and issues an `HttpOnly; SameSite=None; Secure` cookie named `session_token`.
+- **Password Security**: Passwords are authenticated and hashed using `bcrypt` with unique salts. Password hashes are excluded from all API responses.
+- **Google OAuth**: Clients send a Google ID token to `POST /api/auth/session`. The server validates the token against Google OAuth servers using `google-auth`. New users default to the **Student** role with `Pending` status until reviewed by an Admin.
+- **Session Identification**: The `current_user` dependency resolves the caller from the cookie or `Authorization: Bearer` header, checks expiration, and applies active delegation slots.
+
+---
+
+## 🛡 Roles & Permissions (RBAC)
 
 ```python
 ROLES = {"Admin", "Asset Manager", "HOD", "Employee", "Student"}
 
 ROLE_PERMISSIONS = {
-  "Admin":         {"admin","asset_write","maintenance_write","booking","audit","nodues","reports"},
-  "Asset Manager": {"asset_write","maintenance_write","booking","audit","reports"},
-  "HOD":           {"asset_write","maintenance_write","booking","reports"},
-  "Employee":      {"maintenance_write","booking","reports"},
-  "Student":       {"booking","maintenance_write"},
+    "Admin":         {"admin", "asset_write", "maintenance_write", "booking", "audit", "nodues", "reports"},
+    "Asset Manager": {"asset_write", "maintenance_write", "booking", "audit", "reports"},
+    "HOD":           {"asset_write", "maintenance_write", "booking", "reports"},
+    "Employee":      {"maintenance_write", "booking", "reports"},
+    "Student":       {"booking", "maintenance_write"},
 }
 ```
 
-- `require_permission("x")` is a FastAPI dependency injected into protected routes;
-  it raises **403** if the caller's role lacks the permission.
-- **Delegation:** in `current_user`, if a `delegations` record has the caller as
-  `deputy_id` and the current time is inside `[start_at, end_at]` with status
-  `Scheduled`, the user's role is temporarily elevated to **Admin** for that request.
-- Guardrails: signup always creates **Student/Pending**; an Admin cannot demote
-  themselves out of Admin.
+- Injected via `Depends(require_permission("permission_name"))`.
+- Forbidden operations raise HTTP `403 Forbidden`.
+- An Admin cannot demote themselves or revoke their own admin permissions to protect system accessibility.
 
 ---
 
-## 4. API Endpoints
+## 🔌 API Endpoints Reference
 
-All under `/api`. "Perm" is the permission checked (blank = any authenticated user).
+All endpoints reside under the `/api` prefix.
 
-### Auth
-| Method | Path | Perm | Description |
+### Authentication & Account
+| Method | Route | Permission | Description |
 |---|---|---|---|
-| GET  | `/` | — | Health/info |
-| POST | `/auth/signup` | — | Create account (Student/Pending) |
-| POST | `/auth/login` | — | Email/password login → session cookie |
-| GET  | `/auth/me` | auth | Current user profile |
-| POST | `/auth/session` | — | Exchange Google/Emergent session id |
-| POST | `/auth/logout` | auth | Clear session |
+| `GET` | `/` | Open | Health check & API version information |
+| `POST` | `/auth/signup` | Open | Register new account (Student / Pending) |
+| `POST` | `/auth/login` | Open | Authenticate via email & password |
+| `GET` | `/auth/me` | Authenticated | Fetch current user session profile |
+| `PATCH`| `/auth/profile` | Authenticated | Update user display name, phone, department |
+| `POST` | `/auth/session` | Open | Exchange Google OAuth ID token for session |
+| `POST` | `/auth/logout` | Authenticated | Invalidate session token & clear cookie |
 
-### Dashboard / Activity
-| GET | `/dashboard` | auth | KPIs + recent activity |
-| GET | `/activity` | auth | Full audit log (latest 200) |
+### Dashboard & Inventory
+| Method | Route | Permission | Description |
+|---|---|---|---|
+| `GET` | `/dashboard` | Authenticated | Overview KPIs, asset counts, live activity feed |
+| `GET` | `/activity` | Authenticated | Chronological audit trail (filters for alerts, bookings, approvals) |
+| `GET` | `/assets` | Authenticated | Filterable asset catalog (status, category, search) |
+| `POST`| `/assets` | `asset_write` | Register new campus asset |
+| `GET` | `/assets/{asset_id}` | Authenticated | Retrieve complete asset specifications |
+| `PATCH`| `/assets/{asset_id}` | `asset_write` | Update asset details, location, status |
+| `POST`| `/assets/{asset_id}/checkout` | Authenticated | Allocate asset to a student or staff holder |
+| `POST`| `/assets/{asset_id}/checkin` | Authenticated | Process return of an allocated asset |
+| `GET` | `/assets/by-tag/{tag}` | Authenticated | Rapid QR code tag lookup for mobile scanning |
 
-### Assets
-| GET   | `/assets` | auth | List (search, status, category filters) |
-| POST  | `/assets` | asset_write | Create asset |
-| GET   | `/assets/{asset_id}` | auth | Asset detail |
-| PATCH | `/assets/{asset_id}` | asset_write | Update asset |
-| POST  | `/assets/{asset_id}/checkout` | auth | Allocate to holder |
-| POST  | `/assets/{asset_id}/checkin` | auth | Return |
-| GET   | `/assets/by-tag/{tag}` | auth | Lookup by QR/tag (scan flow) |
+### Maintenance & Work Orders
+| Method | Route | Permission | Description |
+|---|---|---|---|
+| `GET` | `/maintenance` | Authenticated | Fetch Kanban board work orders grouped by stage |
+| `POST`| `/maintenance` | `maintenance_write` | Raise maintenance issue (triggers push if High priority) |
+| `PATCH`| `/maintenance/{id}` | `maintenance_write` | Transition ticket (In Progress, Resolved, Rejected) |
+| `DELETE`| `/maintenance/{id}` | `maintenance_write` | Delete work order (restricted to creator or manager) |
+| `GET` | `/uploads/signature`| Authenticated | Issue signed Cloudinary direct upload token |
+| `POST`| `/maintenance/{id}/photos` | `maintenance_write` | Attach Cloudinary evidence photo |
+| `DELETE`| `/maintenance/{id}/photos/{public_id}` | `maintenance_write` | Remove evidence photo |
 
-### Maintenance
-| GET    | `/maintenance` | auth | Board data (grouped by stage) |
-| POST   | `/maintenance` | maintenance_write | Raise work order (push to Admin/AM/HOD if high) |
-| PATCH  | `/maintenance/{request_id}` | maintenance_write | Move stage / resolve / reject |
-| DELETE | `/maintenance/{request_id}` | maintenance_write | Delete (owner or Admin/AM/HOD) |
-| POST   | `/maintenance/{request_id}/photos` | maintenance_write | Attach Cloudinary photo |
-| DELETE | `/maintenance/{request_id}/photos/{public_id}` | maintenance_write | Remove photo |
+*Note: Resolved maintenance items are automatically deleted after 30 days.*
 
-> Resolved work orders are **auto-deleted 30 days** after resolution.
+### Bookings & Facility Reservations
+| Method | Route | Permission | Description |
+|---|---|---|---|
+| `GET` | `/bookings` | Authenticated | List all active and upcoming calendar reservations |
+| `POST`| `/bookings` | `booking` | Reserve a lab, hall, bus, or projector |
+| `DELETE`| `/bookings/{id}` | `booking` | Cancel an existing reservation |
 
-### Bookings
-| GET    | `/bookings` | auth | List bookings |
-| POST   | `/bookings` | booking | Create booking |
-| DELETE | `/bookings/{booking_id}` | booking | Cancel |
+### Audits & No-Dues Clearance
+| Method | Route | Permission | Description |
+|---|---|---|---|
+| `GET` | `/audits` | `audit` | List historical and active audit cycles |
+| `POST`| `/audits` | `audit` | Initiate a new departmental physical audit run |
+| `PATCH`| `/audits/{audit_id}/items/{asset_id}` | `audit` | Mark item status (`Verified`, `Missing`, `Damaged`) |
+| `POST`| `/audits/{audit_id}/items/{asset_id}/photos` | `audit` | Attach physical verification photo |
+| `POST`| `/audits/{audit_id}/close` | `audit` | Close audit run and compile final reconciliation |
+| `GET` | `/audits/{audit_id}/pdf` | `audit` | Stream generated audit report PDF |
+| `GET` | `/nodues` | `nodues` | List all student clearance statuses (Admin only) |
+| `PATCH`| `/nodues/{student_id}/{dept}` | `nodues` | Update department clearance status |
 
-### Audits
-| GET   | `/audits` | audit | List audits |
-| POST  | `/audits` | audit | Start audit run |
-| PATCH | `/audits/{audit_id}/items/{asset_id}` | audit | Set item condition |
-| POST  | `/audits/{audit_id}/items/{asset_id}/photos` | audit | Attach evidence |
-| POST  | `/audits/{audit_id}/close` | audit | Close audit |
-| GET   | `/audits/{audit_id}/pdf` | audit | Closed-audit PDF |
+### Reports, Digest & Push Notifications
+| Method | Route | Permission | Description |
+|---|---|---|---|
+| `GET` | `/reports` | `reports` | Operational asset utilization summary |
+| `GET` | `/reports/accreditation` | `reports` | NAAC/NBA accreditation data indicators |
+| `GET` | `/reports/accreditation/download` | `reports` | Download signed NAAC/NBA report (PDF or CSV) |
+| `GET` | `/digest/weekly` | `reports` | Executive Monday digest (briefing + print view) |
+| `GET` | `/notifications` | Authenticated | Fetch user notification feed |
+| `POST`| `/notifications/mark-all-read` | Authenticated | Mark all notifications read |
+| `GET` | `/push/public-key` | Authenticated | Retrieve server VAPID public key |
+| `POST`| `/push/subscribe` | Authenticated | Store browser push notification subscription |
+| `POST`| `/push/unsubscribe` | Authenticated | Remove push notification subscription |
 
-### No-Dues
-| GET   | `/nodues` | nodues | Student clearance list (Admin only) |
-| PATCH | `/nodues/{student_id}/{department}` | nodues | Update a department status |
-
-### Reports & Digest
-| GET | `/reports` | reports | Operational report |
-| GET | `/reports/accreditation` | reports | NAAC/NBA report data |
-| GET | `/reports/accreditation/download` | reports | Signed PDF / CSV export |
-| GET | `/digest/weekly` | reports | Weekly digest (admin view) |
-
-### Notifications & Push
-| GET  | `/notifications` | auth | Notification feed |
-| POST | `/notifications/mark-all-read` | auth | Mark read |
-| GET  | `/push/public-key` | auth | VAPID public key |
-| POST | `/push/subscribe` | auth | Store push subscription |
-| POST | `/push/unsubscribe` | auth | Remove subscription |
-
-### Admin
-| GET/POST | `/admin/departments` | admin | List / create departments |
-| GET/POST | `/admin/categories` | admin | List / create categories |
-| GET   | `/admin/users` | admin | List users |
-| PATCH | `/admin/users/{user_id}/role` | admin | Change role/status |
-| GET   | `/admin/role-preview/{role}` | admin | Role playground preview |
-| GET/PUT | `/admin/branding` | admin | Institution cover-sheet/branding |
-| GET/POST | `/admin/delegations` | admin | List / create delegation slots |
-| DELETE | `/admin/delegations/{delegation_id}` | admin | Revoke delegation |
-| POST  | `/admin/imports/{kind}` | admin | Bulk CSV import (e.g. assets/users) |
+### Administration & Configuration
+| Method | Route | Permission | Description |
+|---|---|---|---|
+| `GET`/`POST` | `/admin/departments` | `admin` | List or create academic/operational departments |
+| `GET`/`POST` | `/admin/categories` | `admin` | List or create asset classification categories |
+| `GET` | `/admin/users` | `admin` | List all registered campus accounts |
+| `PATCH` | `/admin/users/{id}/role` | `admin` | Promote or modify user role and status |
+| `GET` | `/admin/role-preview/{role}` | `admin` | Test UI capability permissions for a role |
+| `GET`/`PUT` | `/admin/branding` | `admin` | Update institution name, logo, accent color, footer |
+| `GET`/`POST` | `/admin/delegations` | `admin` | List or create scheduled Admin delegation windows |
+| `DELETE` | `/admin/delegations/{id}` | `admin` | Revoke an administrative delegation slot |
+| `POST` | `/admin/imports/{kind}` | `admin` | Bulk import assets or users from CSV files |
+| `GET`/`POST` | `/admin/templates` | `admin` | List or configure custom report templates |
+| `GET`/`PATCH`/`DELETE` | `/admin/templates/{id}` | `admin` | Manage specific custom report template |
+| `POST` | `/admin/seed` | `admin` | Refresh or repopulate the 260-asset demo dataset |
 
 ---
 
-## 5. Data Model (MongoDB collections)
+## 🗄 Data Model & MongoDB Collections
 
-| Collection | Key fields |
+| Collection | Description & Key Document Fields |
 |---|---|
-| `users` | user_id, name, email, role, department, status, password_hash, picture |
-| `user_sessions` | user_id, session_token, created_at, expires_at |
-| `assets` | asset_id, tag, name, category, location, department, status, serial, bookable, holder |
-| `maintenance` | request_id, asset_id, description, priority, status, raised_by, photos[], created_at |
-| `bookings` | booking_id, asset_id, user, start/end window |
-| `audits` | audit_id, items[{asset_id, condition, photos[]}], status |
-| `nodues` | student_id, student_name, roll_number, overall_status, department_statuses[] |
-| `activity` | event_id, actor, action, entity_type, entity_id, before, after, timestamp |
-| `departments` | department_id, name, type, head, status |
-| `categories` | category_id, name, example_items, warranty_tracked, amc_tracked |
-| `branding` | institution name, tagline, accreditation body, footer, accent colour, logo |
-| `delegations` | delegation_id, admin_id/name, deputy_id, start_at, end_at, status |
-| `push_subs` | subscription endpoint + keys per user |
-| `notification_state` | per-user read markers |
+| `users` | `user_id`, `name`, `email`, `role`, `department`, `status`, `password_hash`, `picture`, `created_at` |
+| `user_sessions` | `session_token`, `user_id`, `created_at`, `expires_at` |
+| `assets` | `asset_id`, `tag`, `name`, `category`, `department`, `location`, `status`, `serial`, `bookable`, `holder`, `purchase_cost`, `warranty_end` |
+| `maintenance` | `request_id`, `asset_id`, `description`, `priority`, `status`, `raised_by`, `photos[]`, `created_at`, `resolved_at` |
+| `bookings` | `booking_id`, `resource_id`, `resource_name`, `user_id`, `date`, `start_time`, `end_time`, `purpose`, `status` |
+| `audits` | `audit_id`, `department`, `period`, `status`, `auditors[]`, `items[{asset_id, verification, note, photos[]}]` |
+| `nodues` | `student_id`, `student_name`, `roll_number`, `overall_status`, `department_statuses[{department, status, note}]` |
+| `activity` | `event_id`, `actor_id`, `actor_name`, `action`, `entity_type`, `entity_id`, `before`, `after`, `timestamp` |
+| `departments` | `department_id`, `name`, `type`, `head`, `status` |
+| `categories` | `category_id`, `name`, `example_items`, `warranty_tracked`, `amc_tracked` |
+| `branding` | `institution_name`, `tagline`, `accreditation_body`, `footer_text`, `accent_color`, `logo_url` |
+| `delegations` | `delegation_id`, `admin_id`, `deputy_id`, `deputy_email`, `start_at`, `end_at`, `status` |
+| `push_subs` | `user_id`, `endpoint`, `keys{p256dh, auth}`, `created_at` |
+| `report_templates` | `template_id`, `name`, `description`, `data_source`, `columns[]`, `filters{}`, `access_roles[]` |
 
 ---
 
-## 6. Local Development Setup
+## 📦 Demo Dataset & Seeding
 
-### Prerequisites
-
-- **Python 3.11** - [Download here](https://www.python.org/downloads/)
-- **MongoDB** (local or MongoDB Atlas account)
-- **pip** (Python package manager)
-
-### Step-by-Step Setup
-
-1. **Navigate to the backend directory:**
-   ```bash
-   cd backend
-   ```
-
-2. **Create a virtual environment (recommended):**
-   ```bash
-   python -m venv venv
-   # On Windows:
-   venv\Scripts\activate
-   # On macOS/Linux:
-   source venv/bin/activate
-   ```
-
-3. **Install Python dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Configure environment variables:**
-   Create a `.env` file by copying the example file:
-   ```bash
-   cp .env.example .env
-   ```
-   Then edit `.env` with your actual credentials (see [Environment Variables](#environment-variables) section)
-
-5. **Start the development server:**
-   ```bash
-   uvicorn server:app --reload --host 0.0.0.0 --port 8001
-   ```
-
-6. **Verify the server is running:**
-   ```bash
-   curl http://localhost:8001/api/
-   ```
-
-The backend will be available at `http://localhost:8001` with the API prefixed by `/api`.
-
-### Development Tools
-
-**Code Formatting:**
-```bash
-# Format code with Black
-black server.py
-
-# Sort imports with isort
-isort server.py
-```
-
-**Linting:**
-```bash
-# Lint with flake8
-flake8 server.py
-
-# Type checking with mypy
-mypy server.py
-```
-
----
-
-## 7. External Services Configuration
-
-The backend requires several external services to function properly:
-
-### MongoDB Atlas
-
-1. **Create a MongoDB Atlas account** at [https://www.mongodb.com/cloud/atlas](https://www.mongodb.com/cloud/atlas)
-2. **Create a cluster** (free tier available)
-3. **Configure network access** - add your IP to the IP whitelist
-4. **Create a database user** with read/write permissions
-5. **Get the connection string** from the Connect dialog
-6. **Update your `.env` file** with the connection string
-
-### Cloudinary
-
-1. **Create a Cloudinary account** at [https://cloudinary.com/](https://cloudinary.com/)
-2. **Navigate to the Dashboard** to get your credentials:
-   - Cloud Name
-   - API Key
-   - API Secret
-3. **Configure upload settings** (optional) in the Cloudinary console
-4. **Update your `.env` file** with the Cloudinary credentials
-
-### Web Push (VAPID)
-
-1. **Generate VAPID keys** using:
-   ```bash
-   npx web-push generate-vapid-keys
-   ```
-   Or use the online generator: [https://web-push-codelab.glitch.me/](https://web-push-codelab.glitch.me/)
-
-2. **Update your `.env` file** with the VAPID keys
-
-### Google OAuth (via Emergent)
-
-1. **Create a Google Cloud Project** at [https://console.cloud.google.com/](https://console.cloud.google.com/)
-2. **Enable the Google+ API**
-3. **Configure OAuth consent screen**
-4. **Create OAuth 2.0 credentials**
-5. **Configure with Emergent service** to manage the OAuth flow
-
----
-
-## 8. Environment Variables
-
-Create a `.env` file in the backend directory by copying the example file:
-```bash
-cp .env.example .env
-```
-Then edit `.env` with your actual credentials. The example file contains all the required variables with placeholder values.
-
-**Required Variables:**
-- `MONGO_URL` - MongoDB Atlas connection string
-- `DB_NAME` - Database name
-- `CLOUDINARY_CLOUD_NAME` - Cloudinary cloud name
-- `CLOUDINARY_API_KEY` - Cloudinary API key
-- `CLOUDINARY_API_SECRET` - Cloudinary API secret
-- `VAPID_PUBLIC_KEY` - VAPID public key for push notifications
-- `VAPID_PRIVATE_KEY` - VAPID private key for push notifications
-- `VAPID_SUBJECT` - VAPID subject (email)
-- `GOOGLE_CLIENT_ID` - Google OAuth client ID
-- `GOOGLE_CLIENT_SECRET` - Google OAuth client secret
-
-**Important Notes:**
-- Never commit the `.env` file to version control
-- Use strong, unique passwords for MongoDB
-- Keep API secrets secure and rotate them regularly
-- In production, use environment-specific configurations
-
----
-
-## 9. Integrations
-
-- **Cloudinary** — the client requests a short-lived upload **signature** from
-  `GET /api/uploads/signature`, uploads the file directly to Cloudinary, then posts
-  the resulting `public_id`/URL back to the relevant `*/photos` endpoint. RBAC controls
-  who may delete a photo (owner or manager roles). Config via `CLOUDINARY_*` env.
-- **ReportLab** — server-side PDF generation for the NAAC/NBA accreditation report
-  (uses the admin-edited branding cover sheet + accent colour), closed-audit PDFs, and
-  the weekly digest.
-- **Web Push (VAPID)** — `pywebpush` sends browser notifications (e.g. high-priority
-  maintenance). Keys via `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT`.
-
----
-
-## 10. Testing
-
-### Running Tests
+The backend ships with an enterprise-scale seed generator in `seed_data.py`:
+- Populates **260 realistic assets** across 15 campus departments and 10 categories.
+- Populates **50 maintenance tickets**, **45 bookings**, **12 audits**, **35 no-dues records**, and **300 activity logs**.
+- Populates **28 demo users** across all permission tiers.
 
 ```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=server
-
-# Run specific test file
-pytest tests/test_specific.py
-
-# Run with verbose output
-pytest -v
-```
-
-### Test Structure
-
-- **Unit tests**: Test individual functions and components
-- **Integration tests**: Test API endpoints and database interactions
-- **Authentication tests**: Verify session management and RBAC
-
-### Test Files
-
-- `tests/test_assetflow_api.py` - Main backend test suite
-- `tests/test_new_features.py` - Tests for new features
-
-### Key Dependencies
-
-- `pytest` - Testing framework
-- `pytest-xdist` - Parallel test execution
-- `pytest-cov` - Coverage reporting
-
----
-
-## 11. Deployment
-
-### Production Deployment
-
-The backend is designed to run in production environments using:
-
-1. **Supervisor** (recommended for production)
-2. **Kubernetes** (for containerized deployments)
-3. **Docker** (for containerization)
-
-### Supervisor Configuration
-
-Example supervisor configuration:
-
-```ini
-[program:backend]
-command=/path/to/venv/bin/uvicorn server:app --host 0.0.0.0 --port 8001
-directory=/path/to/backend
-user=www-data
-autostart=true
-autorestart=true
-redirect_stderr=true
-stdout_logfile=/var/log/supervisor/backend.log
-environment=ENV_VAR="value"
-```
-
-**Commands:**
-```bash
-# Restart backend service
-sudo supervisorctl restart backend
-
-# Check status
-sudo supervisorctl status backend
-
-# View logs
-tail -f /var/log/supervisor/backend.log
-```
-
-### Docker Deployment
-
-Create a `Dockerfile`:
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8001"]
-```
-
-**Build and run:**
-```bash
-docker build -t assetflow-backend .
-docker run -p 8001:8001 --env-file .env assetflow-backend
-```
-
-### Environment-Specific Considerations
-
-- **Production**: Use production MongoDB Atlas cluster, secure API keys, enable HTTPS
-- **Staging**: Use staging environment for testing before production deployment
-- **Development**: Use local MongoDB or development Atlas cluster
-
----
-
-## 12. Troubleshooting
-
-### Common Issues
-
-**Connection to MongoDB failed:**
-- Verify `MONGO_URL` is correct in `.env`
-- Check MongoDB Atlas IP whitelist includes your server IP
-- Ensure database user has correct permissions
-- Check network connectivity to MongoDB Atlas
-
-**Cloudinary upload errors:**
-- Verify Cloudinary credentials are correct
-- Check Cloudinary account status and limits
-- Ensure upload presets are properly configured
-- Check file size limits and supported formats
-
-**Push notifications not working:**
-- Verify VAPID keys are correctly configured
-- Check browser supports Web Push API
-- Ensure service worker is properly registered
-- Check push subscription is valid
-
-**Authentication failures:**
-- Verify session cookie is being sent
-- Check session expiration settings
-- Ensure `current_user` dependency is working
-- Verify RBAC permissions are correctly configured
-
-**PDF generation errors:**
-- Check ReportLab installation
-- Verify font availability
-- Check branding configuration
-- Ensure sufficient memory for PDF generation
-
-### Debug Mode
-
-Enable debug mode for detailed error messages:
-
-```bash
-uvicorn server:app --reload --host 0.0.0.0 --port 8001 --log-level debug
-```
-
-### Log Files
-
-- **Supervisor logs**: `/var/log/supervisor/backend.log`
-- **Application logs**: Configure logging in `server.py`
-- **Error logs**: Check both application and supervisor logs
-
----
-
-## Key Dependencies
-
-The backend uses the following key libraries (see `requirements.txt` for full list):
-
-- `fastapi` - Modern web framework for building APIs
-- `uvicorn` - ASGI server for running FastAPI
-- `motor` - Async MongoDB driver
-- `pydantic` - Data validation and settings management
-- `bcrypt` - Password hashing
-- `cloudinary` - Cloud image and video management
-- `reportlab` - PDF generation
-- `pywebpush` - Web Push notification support
-- `python-dotenv` - Environment variable management
-- `google-auth` - Google OAuth authentication
-- `requests` - HTTP library for making requests
-
----
-
-## Seeding
-
-A comprehensive, realistic demo dataset is provided in `backend/seed_data.py` (and automatically invoked on backend startup if the database has fewer than 50 assets):
-
-- **260 Assets**: Spanning 10 categories, 15 campus departments, and all operational statuses (`Available`, `Allocated`, `Under Maintenance`, `Lost`, `Retired`), bookable equipment and facilities, financial records, warranties, and suppliers.
-- **50 Maintenance Requests**: Spanning `Pending`, `Approved`, `In progress`, `Resolved`, and `Rejected` statuses across `High`, `Medium`, and `Low` priorities.
-- **45 Bookings**: Past history, today's schedule, and upcoming 7-day calendar reservations for rooms, buses, laptops, projectors, and labs.
-- **12 Audit Cycles**: 5 Open cycles and 7 Closed cycles with item verifications (`Verified`, `Missing`, `Damaged`, `Pending`) and photo evidence.
-- **35 Student No-Dues Clearances**: Clearances across Library, Hostel, Sports, Laboratory, and Accounts (`Cleared`, `In progress`, `Pending`).
-- **300 Activity Logs**: Full 30-day chronological audit trail across alerts, approvals, bookings, and asset mutations.
-- **28 Demo Users**: Across `Admin`, `Asset Manager`, `HOD`, `Employee`, and `Student` roles.
-- **15 Campus Departments & 10 Asset Categories**.
-- **8 Custom Report Templates & 6 Administrative Delegations**.
-
-### Running the Seed Script Manually
-
-```bash
-cd backend
+# Populate or reset seed data
 python seed_data.py
-```
 
-To preserve existing data without dropping:
-```bash
+# Seed while preserving existing records
 python seed_data.py --keep
 ```
 
-An admin can also trigger a complete seed refresh directly via `POST /api/admin/seed` or from the Admin Console UI.
+---
+
+## 💻 Local Setup & Development
+
+```bash
+# 1. Activate Python virtual environment
+python -m venv venv
+venv\Scripts\activate   # Windows
+source venv/bin/activate # Linux/macOS
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Configure environment
+cp .env.example .env
+
+# 4. Start local development server with hot-reload
+uvicorn server:app --reload --host 0.0.0.0 --port 8001
+```
+
+---
+
+## 🧪 Testing & Quality Assurance
+
+```bash
+# Run complete test suite
+pytest
+
+# Run tests with verbose output
+pytest -v
+
+# Run with test coverage
+pytest --cov=server tests/
+```
+
+---
+
+## 🚀 Deployment
+
+- **Containerized**: Deploy via standard Dockerfile with Python 3.11-slim.
+- **Supervisor**: Manage via `/etc/supervisor/conf.d/backend.conf` on port 8001.
+- **Ingress**: Reverse proxy route `/api` to port 8001 with preserved cookies.

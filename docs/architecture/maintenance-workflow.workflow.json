@@ -1,0 +1,74 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Asset Maintenance & Work Order Workflow",
+    "animation": "trace",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "output": "docs/architecture/maintenance-workflow.html"
+  },
+  "lanes": [
+    { "id": "requester", "label": "Reporter (Student/Staff)" },
+    { "id": "manager", "label": "Asset Manager / HOD" },
+    { "id": "technician", "label": "Field Technician" },
+    { "id": "automation", "label": "System Automation", "variant": "normal" }
+  ],
+  "phases": [
+    { "id": "intake", "label": "Intake & Triage", "fromCol": 0, "toCol": 1 },
+    { "id": "repair", "label": "Repair Execution", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "closure", "label": "Sign-Off & Retention", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "mainPath": ["report_issue", "triage_order", "approve_order", "repair_asset", "verify_resolution", "resolve_order", "purge_timer"],
+  "nodes": [
+    { "id": "report_issue", "lane": "requester", "col": 0, "type": "frontend", "label": "Report Issue", "sublabel": "Form + Photo Upload", "width": 135 },
+    { "id": "view_status", "lane": "requester", "col": 4, "type": "frontend", "label": "Track Status", "sublabel": "Live Kanban updates", "width": 135 },
+    { "id": "triage_order", "lane": "manager", "col": 1, "type": "backend", "label": "Triage & Review", "sublabel": "Assess impact & urgency", "width": 135 },
+    { "id": "approve_order", "lane": "manager", "col": 2, "type": "security", "label": "Approval Gate", "sublabel": "Approve or Reject", "tag": "RBAC check", "width": 135 },
+    { "id": "reject_order", "lane": "manager", "col": 3, "type": "security", "label": "Reject Order", "sublabel": "Logged with reason", "width": 135 },
+    { "id": "resolve_order", "lane": "manager", "col": 4, "type": "backend", "label": "Manager Sign-Off", "sublabel": "Move to Resolved", "width": 135 },
+    { "id": "repair_asset", "lane": "technician", "col": 2, "type": "backend", "label": "Execute Repair", "sublabel": "Move to In Progress", "width": 135 },
+    { "id": "verify_resolution", "lane": "technician", "col": 3, "type": "cloud", "label": "Attach Evidence", "sublabel": "Cloudinary fix photo", "width": 135 },
+    { "id": "push_alert", "lane": "automation", "col": 2, "type": "messagebus", "label": "Dispatch Push", "sublabel": "VAPID high-priority alert", "width": 135 },
+    { "id": "audit_record", "lane": "automation", "col": 3, "type": "database", "label": "Activity Log", "sublabel": "Immutable state log", "width": 135 },
+    { "id": "purge_timer", "lane": "automation", "col": 5, "type": "database", "label": "30-Day Auto-Purge", "sublabel": "Permanent removal", "tag": "TTL engine", "width": 135 }
+  ],
+  "edges": [
+    { "id": "edge-report", "from": "report_issue", "to": "triage_order", "variant": "emphasis" },
+    { "id": "edge-triage-gate", "from": "triage_order", "to": "approve_order", "variant": "default" },
+    { "id": "edge-approved", "from": "approve_order", "to": "repair_asset", "label": "approved", "variant": "emphasis" },
+    { "id": "edge-rejected", "from": "approve_order", "to": "reject_order", "label": "rejected", "variant": "security", "role": "error" },
+    { "id": "edge-push", "from": "approve_order", "to": "push_alert", "label": "if high priority", "variant": "dashed" },
+    { "id": "edge-repair-verify", "from": "repair_asset", "to": "verify_resolution", "variant": "emphasis" },
+    { "id": "edge-verify-audit", "from": "verify_resolution", "to": "audit_record", "label": "log repair", "variant": "dashed" },
+    { "id": "edge-verify-resolve", "from": "verify_resolution", "to": "resolve_order", "label": "ready for signoff", "variant": "emphasis" },
+    { "id": "edge-track-update", "from": "resolve_order", "to": "view_status", "variant": "dashed" },
+    { "id": "edge-resolve-purge", "from": "resolve_order", "to": "purge_timer", "label": "start 30d TTL", "variant": "emphasis" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Happy Path",
+      "items": [
+        "Reporter logs issue -> Manager approves -> Technician repairs with photo proof -> Manager signs off",
+        "Clear ownership across Reporter, Manager, Field Technician, and System Automation"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Exception & Rejection",
+      "items": [
+        "Manager can reject invalid or duplicate requests at the approval gate",
+        "Rejected orders remain accessible for admin review or reopen"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "Automated Lifecycle",
+      "items": [
+        "High priority issues trigger immediate VAPID push alerts to staff",
+        "Resolved work orders are automatically purged from the database after 30 days"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "schema_version": 2,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Campus Physical Asset Lifecycle",
+    "output": "docs/architecture/asset-lifecycle.html",
+    "animation": "trace",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "main", "label": "Active Operations" },
+    { "id": "waiting", "label": "Reservation & Audit Holds" },
+    { "id": "recovery", "label": "Maintenance & Repair" },
+    { "id": "terminal", "label": "Terminal Outcomes" }
+  ],
+  "states": [
+    { "id": "registered", "type": "start", "label": "Registered", "sublabel": "Tagged & cataloged", "lane": "main", "col": 0, "step": "01", "tag": "intake" },
+    { "id": "available", "type": "active", "label": "Available", "sublabel": "Ready in inventory", "lane": "main", "col": 1, "step": "02", "tag": "pool" },
+    { "id": "allocated", "type": "active", "label": "Allocated", "sublabel": "Checked out to holder", "lane": "main", "col": 2, "step": "03", "tag": "custody" },
+    { "id": "inspecting", "type": "decision", "label": "Audit Review", "sublabel": "Cycle verification", "lane": "main", "col": 3, "step": "04", "tag": "audit" },
+    { "id": "retained", "type": "success", "label": "Active Asset", "sublabel": "Audit verified", "lane": "main", "col": 4, "step": "05", "tag": "verified" },
+    { "id": "reserved", "type": "waiting", "label": "Reserved", "sublabel": "Pending booking pickup", "lane": "waiting", "col": 1, "tag": "wait" },
+    { "id": "audit_hold", "type": "waiting", "label": "Audit Hold", "sublabel": "Missing / unlocated", "lane": "waiting", "col": 3, "tag": "pause" },
+    { "id": "under_repair", "type": "active", "label": "In Maintenance", "sublabel": "Kanban repair order", "lane": "recovery", "col": 2, "tag": "repair" },
+    { "id": "lost", "type": "failure", "label": "Written Off", "sublabel": "Lost or unaccounted", "lane": "terminal", "col": 3, "tag": "terminal" },
+    { "id": "retired", "type": "failure", "label": "Retired", "sublabel": "Decommissioned / scrap", "lane": "terminal", "col": 4, "tag": "terminal" }
+  ],
+  "transitions": [
+    { "from": "registered", "to": "available", "label": "stock asset" },
+    { "from": "available", "to": "allocated", "label": "check out" },
+    { "from": "allocated", "to": "available", "label": "check in" },
+    { "from": "available", "to": "reserved", "label": "booking created", "variant": "dashed" },
+    { "from": "reserved", "to": "allocated", "label": "booking fulfilled" },
+    { "from": "allocated", "to": "under_repair", "label": "damage report", "variant": "security" },
+    { "from": "under_repair", "to": "available", "label": "repair complete", "variant": "emphasis" },
+    { "from": "allocated", "to": "inspecting", "label": "audit cycle" },
+    { "from": "inspecting", "to": "retained", "label": "verified" },
+    { "from": "inspecting", "to": "audit_hold", "label": "missing flag", "variant": "security" },
+    { "from": "audit_hold", "to": "lost", "label": "unrecovered", "variant": "security" },
+    { "from": "retained", "to": "retired", "label": "end of life", "variant": "security" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Primary Operational Rail",
+      "items": [
+        "Assets progress from Registration to Available inventory, Allocation, and Routine Audit",
+        "Successful repair loops return assets directly back to Available inventory"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Wait States",
+      "items": [
+        "Reservation holds prevent double-booking before actual physical check-out",
+        "Audit Holds temporarily pause disposition to investigate unaccounted items"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Terminal Dispositions",
+      "items": [
+        "Every lifecycle ending is explicit: unrecovered assets terminate as Written Off",
+        "Aging or obsolete assets formally conclude as Retired/Decommissioned"
+      ]
+    }
+  ]
+}

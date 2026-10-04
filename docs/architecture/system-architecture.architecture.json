@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "AssetFlow Campus - High-Level System Architecture",
+    "output": "docs/architecture/system-architecture.html",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    { "id": "users", "type": "external", "label": "Campus Users", "sublabel": "Students / Staff / HOD", "pos": [40, 220], "size": [130, 60] },
+    { "id": "custodian", "type": "external", "label": "Asset Custodians", "sublabel": "Field Techs / Auditors", "pos": [40, 360], "size": [130, 60] },
+    { "id": "spa", "type": "frontend", "label": "React 19 SPA", "sublabel": "Desktop UI & Admin", "pos": [230, 220], "size": [135, 60] },
+    { "id": "pwa_scanner", "type": "frontend", "label": "Mobile PWA Scanner", "sublabel": "QR Scan (/scan)", "pos": [230, 360], "size": [135, 60] },
+    { "id": "ingress", "type": "cloud", "label": "Ingress / Proxy", "sublabel": "HTTPS :443 -> :8001", "pos": [430, 290], "size": [130, 60] },
+    { "id": "fastapi", "type": "backend", "label": "FastAPI Core", "sublabel": "server.py :8001", "pos": [630, 290], "size": [130, 60] },
+    { "id": "rbac", "type": "security", "label": "RBAC & Delegation", "sublabel": "5 Roles + Time Window", "pos": [630, 140], "size": [135, 64], "tag": "Server Enforced" },
+    { "id": "audit_logger", "type": "backend", "label": "Activity Logger", "sublabel": "Audit Trail (300+ logs)", "pos": [630, 440], "size": [135, 60] },
+    { "id": "mongodb", "type": "database", "label": "MongoDB Atlas", "sublabel": "Async Motor (14 collections)", "pos": [850, 290], "size": [140, 60], "tag": "UUID Keys" },
+    { "id": "cloudinary", "type": "cloud", "label": "Cloudinary CDN", "sublabel": "Signed Photo Vault", "pos": [850, 140], "size": [135, 60] },
+    { "id": "reportlab", "type": "backend", "label": "ReportLab PDF", "sublabel": "NAAC/NBA & Digest", "pos": [850, 440], "size": [135, 60] },
+    { "id": "webpush", "type": "messagebus", "label": "Web Push (VAPID)", "sublabel": "pywebpush alerts", "pos": [1060, 290], "size": [135, 60] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Client Tier", "wraps": ["users", "custodian", "spa", "pwa_scanner"] },
+    { "kind": "security-group", "label": "Backend Application Services", "wraps": ["ingress", "fastapi", "rbac", "audit_logger", "reportlab"] },
+    { "kind": "region", "label": "Data & Cloud Infrastructure", "wraps": ["mongodb", "cloudinary", "webpush"] }
+  ],
+  "connections": [
+    { "id": "users-spa", "from": "users", "to": "spa", "label": "HTTPS", "variant": "emphasis" },
+    { "id": "custodian-pwa", "from": "custodian", "to": "pwa_scanner", "label": "PWA Camera", "variant": "emphasis" },
+    { "id": "spa-ingress", "from": "spa", "to": "ingress", "label": "/api requests" },
+    { "id": "pwa-ingress", "from": "pwa_scanner", "to": "ingress", "label": "tag lookup" },
+    { "id": "ingress-fastapi", "from": "ingress", "to": "fastapi", "label": "reverse proxy", "variant": "emphasis" },
+    { "id": "fastapi-rbac", "from": "fastapi", "to": "rbac", "label": "perm check", "variant": "security" },
+    { "id": "fastapi-mongo", "from": "fastapi", "to": "mongodb", "label": "CRUD / Motor", "variant": "emphasis" },
+    { "id": "fastapi-audit", "from": "fastapi", "to": "audit_logger", "label": "log_event()", "variant": "dashed" },
+    { "id": "fastapi-cloudinary", "from": "fastapi", "to": "cloudinary", "label": "upload signature", "variant": "dashed" },
+    { "id": "fastapi-reportlab", "from": "fastapi", "to": "reportlab", "label": "generate PDF", "variant": "dashed" },
+    { "id": "fastapi-webpush", "from": "fastapi", "to": "webpush", "label": "VAPID push", "variant": "dashed" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Primary Path", "items": ["Client Requests -> Ingress -> FastAPI Gateway -> RBAC Validation -> MongoDB Atlas", "Every successful mutation writes an immutable audit record to the Activity log"] },
+    { "dot": "rose", "title": "Security & RBAC", "items": ["5 Roles: Admin, Asset Manager, HOD, Employee, Student", "Time-windowed Admin delegation slots evaluated per request", "Passwords hashed with bcrypt; UUID primary keys throughout"] },
+    { "dot": "cyan", "title": "External Integrations", "items": ["Cloudinary signed uploads for maintenance & audit photos", "ReportLab server-side generation of NAAC/NBA accreditation & digest reports", "Web Push notifications via VAPID for high-priority incidents"] }
+  ]
+}
