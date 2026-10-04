@@ -55,46 +55,52 @@ docs/architecture/
 - **Primary Path**: Client requests traverse Ingress (`:443`) into the FastAPI Application (`:8001`), undergo RBAC validation, commit mutations to MongoDB Atlas, and emit immutable audit records to the Activity Logger.
 
 ```mermaid
-graph TB
-    subgraph Client_Tier["Client Tier (Browsers & Field Devices)"]
-        Users["Campus Users<br/>(Students / Staff / HODs)"]
-        Custodians["Asset Custodians<br/>(Technicians / Auditors)"]
-        SPA["React 19 SPA<br/>Desktop UI & Admin Shell"]
-        PWA["Mobile PWA Scanner<br/>Camera QR Flow (:3000)"]
+flowchart TD
+    subgraph ClientTier["1. Client Tier (Web & Mobile)"]
+        Users["Campus Users<br/>(Students & Staff)"]
+        Custodians["Field Custodians<br/>(Technicians & Auditors)"]
+        SPA["React 19 SPA<br/>(Desktop UI & Admin)"]
+        PWA["Mobile PWA Scanner<br/>(Camera QR :3000)"]
+        Users -->|"HTTPS :3000"| SPA
+        Custodians -->|"PWA Camera"| PWA
     end
 
-    subgraph App_Tier["Backend Application Services"]
-        Ingress["Reverse Proxy / Ingress<br/>HTTPS :443 ➔ :8001"]
-        FastAPI["FastAPI Core Service<br/>server.py (:8001)"]
-        RBAC["RBAC & Delegation Guard<br/>5 Roles + Time-Window Slots"]
-        ActivityLogger["Activity Logger<br/>Immutable Audit Trail"]
-        ReportLab["ReportLab PDF Engine<br/>NAAC/NBA & Digest Reports"]
+    subgraph GatewayTier["2. Ingress & Routing"]
+        Ingress["Reverse Proxy / Ingress<br/>(HTTPS :443 ➔ :8001)"]
+        SPA -->|"/api requests"| Ingress
+        PWA -->|"tag lookup"| Ingress
     end
 
-    subgraph Cloud_Tier["Data & Cloud Infrastructure"]
-        MongoDB[("MongoDB Atlas<br/>Async Motor (14 Collections)")]
-        Cloudinary["Cloudinary CDN<br/>Signed Evidence Photo Vault"]
-        WebPush["Web Push Gateway<br/>pywebpush (VAPID Alerts)"]
+    subgraph AppTier["3. Backend Application Services"]
+        FastAPI["FastAPI Core Engine<br/>(server.py :8001)"]
+        RBAC["RBAC & Delegation Guard<br/>(5 Roles + Time Slots)"]
+        ActivityLogger["Activity Logger<br/>(Audit Trail)"]
+        ReportLab["ReportLab Engine<br/>(PDF Generation)"]
+        
+        Ingress -->|"Proxy Pass"| FastAPI
+        FastAPI --- RBAC
+        FastAPI -->|"log_event"| ActivityLogger
+        FastAPI -->|"PDF Render"| ReportLab
     end
 
-    Users -->|HTTPS| SPA
-    Custodians -->|PWA Camera| PWA
-    SPA -->|/api requests| Ingress
-    PWA -->|QR tag lookup| Ingress
-    Ingress -->|Reverse Proxy| FastAPI
-    FastAPI -->|Authorize Dependency| RBAC
-    FastAPI -->|CRUD / Motor Async| MongoDB
-    FastAPI -.->|Emit Audit Events| ActivityLogger
-    FastAPI -.->|Signed Upload Signatures| Cloudinary
-    FastAPI -.->|Generate PDF Reports| ReportLab
-    FastAPI -.->|Dispatch Urgent Alerts| WebPush
-    ActivityLogger -.->|Append-Only Writes| MongoDB
+    subgraph CloudTier["4. Data & External Cloud Services"]
+        MongoDB[("MongoDB Atlas<br/>(Async Motor Driver)")]
+        Cloudinary["Cloudinary CDN<br/>(Signed Photo Vault)"]
+        WebPush["Web Push Gateway<br/>(VAPID Alerts)"]
+        
+        FastAPI -->|"Async CRUD"| MongoDB
+        ActivityLogger -->|"Append Logs"| MongoDB
+        FastAPI -->|"Upload Signature"| Cloudinary
+        FastAPI -->|"Urgent Push"| WebPush
+    end
 
     classDef client fill:#e0f2fe,stroke:#0284c7,stroke-width:1px,color:#0369a1;
+    classDef gateway fill:#f1f5f9,stroke:#64748b,stroke-width:1px,color:#334155;
     classDef app fill:#f0fdf4,stroke:#16a34a,stroke-width:1px,color:#15803d;
     classDef cloud fill:#fef3c7,stroke:#d97706,stroke-width:1px,color:#b45309;
     class Users,Custodians,SPA,PWA client;
-    class Ingress,FastAPI,RBAC,ActivityLogger,ReportLab app;
+    class Ingress gateway;
+    class FastAPI,RBAC,ActivityLogger,ReportLab app;
     class MongoDB,Cloudinary,WebPush cloud;
 ```
 
@@ -195,50 +201,57 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     subgraph S0["1. Sources"]
-        PWA["Mobile Scanner<br/>(QR Field Actions)"]:::stream
-        WEB["Web Portal Forms<br/>(Asset Mutations)"]:::stream
-        CSV["CSV Bulk Feeds<br/>(Legacy Data Dumps)"]:::batch
+        PWA["Mobile Scanner<br/>(QR Field Actions)"]
+        WEB["Web Portal Forms<br/>(Asset Mutations)"]
+        CSV["CSV Bulk Feeds<br/>(Legacy Data Dumps)"]
     end
 
     subgraph S1["2. Ingest & Gate"]
         GATEWAY["FastAPI Gateway<br/>(Sanitize & UUID Map)"]
-        RBAC["RBAC Policy Gate<br/>(Session & Permission Guard)"]
+        RBAC["RBAC Policy Gate<br/>(Session & Permission)"]
     end
 
     subgraph S2["3. Process & Transform"]
-        MUTATION["Mutation Engine<br/>(Atomic State Transitions)"]:::stream
-        ACCRED["Accreditation Engine<br/>(NAAC/NBA Metric Compiler)"]:::batch
+        MUTATION["Mutation Engine<br/>(State Transitions)"]
+        ACCRED["Accreditation Engine<br/>(NAAC/NBA Compiler)"]
     end
 
     subgraph S3["4. Storage & Media"]
-        ATLAS[("MongoDB Atlas<br/>Primary Source of Truth")]
-        AUDIT[("Activity Store<br/>Append-Only Audit Log")]
-        CLOUDINARY[("Cloudinary CDN<br/>Signed Evidence Photos")]
+        ATLAS[("MongoDB Atlas<br/>Primary Database")]
+        AUDIT[("Activity Store<br/>Append-Only Log")]
+        CLOUDINARY["Cloudinary CDN<br/>Evidence Photos"]
     end
 
     subgraph S4["5. Consumers"]
         DASHBOARD["Executive Dashboard<br/>(Live KPIs & Feed)"]
-        REPORTS["Accreditation Reports<br/>(Signed PDF / CSV Export)"]
-        PUSH["Web Push Gateway<br/>(VAPID Urgent Alerts)"]
+        REPORTS["Accreditation Reports<br/>(Signed PDF / CSV)"]
+        PUSH["Web Push Gateway<br/>(VAPID Alerts)"]
     end
 
-    PWA -->|Streaming QR Scans| GATEWAY
-    WEB -->|UI Mutations| GATEWAY
-    CSV -->|Batch CSV Records| GATEWAY
-    GATEWAY -->|Verify Auth| RBAC
-    RBAC -->|Authorized Payloads| MUTATION
-    RBAC -->|Signed Upload Tokens| CLOUDINARY
-    MUTATION -->|Atomic Writes| ATLAS
-    MUTATION -->|log_event()| AUDIT
-    MUTATION -.->|High Priority Alerts| PUSH
-    ATLAS -->|Live Status Queries| DASHBOARD
-    ATLAS -->|Batch Department Aggregation| ACCRED
-    AUDIT -->|Historical Audit Trails| ACCRED
-    ACCRED -->|Formatted Matrix| REPORTS
-    CLOUDINARY -->|Photo Stream| DASHBOARD
+    PWA -->|"Streaming Scans"| GATEWAY
+    WEB -->|"UI Mutations"| GATEWAY
+    CSV -->|"Batch Import"| GATEWAY
+    
+    GATEWAY -->|"Auth Check"| RBAC
+    RBAC -->|"Authorized Data"| MUTATION
+    RBAC -->|"Signed Tokens"| CLOUDINARY
+    
+    MUTATION -->|"Atomic Writes"| ATLAS
+    MUTATION -->|"Audit Trail"| AUDIT
+    MUTATION -->|"High Priority"| PUSH
+    
+    ATLAS -->|"Live Queries"| DASHBOARD
+    ATLAS -->|"Batch Aggregate"| ACCRED
+    AUDIT -->|"Audit History"| ACCRED
+    ACCRED -->|"Export Metrics"| REPORTS
+    CLOUDINARY -->|"Photo Stream"| DASHBOARD
 
     classDef stream fill:#e0f2fe,stroke:#0284c7,stroke-width:1px,color:#0369a1;
     classDef batch fill:#fef3c7,stroke:#d97706,stroke-width:1px,color:#b45309;
+    classDef store fill:#f0fdf4,stroke:#16a34a,stroke-width:1px,color:#15803d;
+    class PWA,WEB,MUTATION,DASHBOARD,PUSH stream;
+    class CSV,ACCRED,REPORTS batch;
+    class ATLAS,AUDIT,CLOUDINARY store;
 ```
 
 ---
@@ -254,33 +267,54 @@ flowchart LR
   - **Explicit Terminal States**: Unaccounted assets end as `Written Off / Lost`; end-of-life equipment ends as `Retired / Disposed`.
 
 ```mermaid
-stateDiagram-v2
-    [*] --> Registered: Procurement & Tagging
-    Registered --> Available: Initial Stocking
+flowchart TD
+    subgraph S_Active["1. Active Operational States"]
+        Registered(["Registered<br/>(Procured & Tagged)"]):::startState
+        Available(["Available<br/>(Inventory Pool)"]):::activeState
+        Allocated(["Allocated<br/>(In Active Custody)"]):::activeState
+        Audited(["Active Asset<br/>(Audit Verified)"]):::activeState
+    end
 
-    Available --> Allocated: Check-out to Holder
-    Allocated --> Available: Check-in / Return
+    subgraph S_Wait["2. Waiting & Holds"]
+        Reserved(["Reserved<br/>(Booking Pending)"]):::waitState
+        AuditHold(["Audit Hold<br/>(Discrepancy Check)"]):::waitState
+    end
 
-    Available --> Reserved: Booking Created (Hold)
-    Reserved --> Allocated: Booking Fulfilled / Picked Up
-    Reserved --> Available: Booking Cancelled / Expired
+    subgraph S_Repair["3. Repair & Recovery"]
+        Maintenance(["In Maintenance<br/>(Kanban Work Order)"]):::repairState
+    end
 
-    Allocated --> In_Maintenance: Damage Reported / Fault Raised
-    In_Maintenance --> Available: Repair Verified & Signed Off
-    In_Maintenance --> Retired: Repair Economically Unviable
+    subgraph S_Terminal["4. Terminal Outcomes"]
+        WrittenOff(["Written Off / Lost<br/>(Unrecovered)"]):::termState
+        Retired(["Retired / Disposed<br/>(Decommissioned)"]):::termState
+    end
 
-    Allocated --> Audit_Review: Annual Audit Cycle Opened
-    Available --> Audit_Review: Audit Verification
-    Audit_Review --> Active_Asset: Condition Verified & Passed
-    Active_Asset --> Available: Return to Regular Pool
+    Registered -->|"Initial Stock"| Available
+    Available -->|"Check-out"| Allocated
+    Allocated -->|"Check-in"| Available
+    
+    Available -->|"Booking Hold"| Reserved
+    Reserved -->|"Pick-up"| Allocated
+    Reserved -->|"Cancel"| Available
+    
+    Allocated -->|"Fault Reported"| Maintenance
+    Maintenance -->|"Repair Complete"| Available
+    Maintenance -->|"Unrepairable"| Retired
+    
+    Allocated -->|"Audit Cycle"| Audited
+    Available -->|"Audit Verify"| Audited
+    Audited -->|"Return to Pool"| Available
+    Audited -->|"Decommission"| Retired
+    
+    Allocated -->|"Missing Flag"| AuditHold
+    AuditHold -->|"Found & Verified"| Available
+    AuditHold -->|"Declared Lost"| WrittenOff
 
-    Audit_Review --> Audit_Hold: Discrepancy / Unlocated Item
-    Audit_Hold --> Available: Found & Re-verified
-    Audit_Hold --> Written_Off: Declared Lost / Unrecoverable
-
-    Active_Asset --> Retired: Decommissioned / Scrapped / Donated
-    Written_Off --> [*]: Terminal Outcome
-    Retired --> [*]: Terminal Outcome
+    classDef startState fill:#f0fdf4,stroke:#16a34a,stroke-width:2px,color:#15803d;
+    classDef activeState fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0369a1;
+    classDef waitState fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#b45309;
+    classDef repairState fill:#ffedd5,stroke:#ea580c,stroke-width:2px,color:#c2410c;
+    classDef termState fill:#fef2f2,stroke:#dc2626,stroke-width:2px,color:#991b1b;
 ```
 
 ---
