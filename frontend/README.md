@@ -1,474 +1,210 @@
-# AssetFlow Campus — Frontend
+# AssetFlow Campus — Frontend Client
 
-A responsive React single-page application (SPA) that adapts fluidly from mobile
-phones to desktop. It talks to the FastAPI backend over a cookie-authenticated
-JSON API and enforces the same roles the backend enforces (UI-level gating on top
-of server-level RBAC).
+A responsive, high-fidelity **React 19** single-page application (SPA) built with **React Router 7**, **Tailwind CSS**, and **shadcn/ui** (Radix UI primitives). It adapts fluidly across mobile phones, tablets, and desktop workstations, connects to the FastAPI backend over a cookie-authenticated JSON API, and provides a mobile PWA QR-code scanning workflow.
 
 ---
 
 ## 📋 Table of Contents
 
-- [Tech Stack](#tech-stack)
+- [Architecture & Design System](#architecture--design-system)
+- [Archify Architecture Specifications](#archify-architecture-specifications)
+- [Directory Layout](#directory-layout)
+- [Routing & Application Pages](#routing--application-pages)
+- [API Client & Authentication](#api-client--authentication)
+- [Key Features & Interactivity](#key-features--interactivity)
+- [Component Architecture & UI Primitives](#component-architecture--ui-primitives)
+- [Styling, Theming & Responsiveness](#styling-theming--responsiveness)
+- [PWA & Mobile QR Workflow](#pwa--mobile-qr-workflow)
 - [Local Development Setup](#local-development-setup)
-- [Environment Variables](#environment-variables)
-- [Project Structure](#project-structure)
-- [Routing & Pages](#routing--pages)
-- [API Client & Auth Flow](#api-client--auth-flow)
-- [Feature Notes](#feature-notes)
-- [Component Library](#component-library)
-- [Styling & Theming](#styling--theming)
-- [Testing](#testing)
+- [Testing & Quality Assurance](#testing--quality-assurance)
 - [Build & Deployment](#build--deployment)
-- [Troubleshooting](#troubleshooting)
 
 ---
 
-## 1. Tech Stack
+## 🏛 Architecture & Design System
 
-| Concern            | Library / Tool |
-|--------------------|----------------|
-| Framework          | **React 19** |
-| Build / tooling    | **Create React App + CRACO** (`craco start/build`) |
-| Routing            | **react-router-dom 7** |
-| Styling            | **Tailwind CSS** + `tailwind-merge`, `tailwindcss-animate`, `clsx`, `class-variance-authority` |
-| UI components      | **shadcn/ui** (Radix UI primitives) in `src/components/ui` |
-| Animation          | **Framer Motion** |
-| Charts             | **Recharts** (dashboard/digest KPIs) |
-| Drag & drop        | **@hello-pangea/dnd** (Trello-style maintenance Kanban) |
-| QR                 | **html5-qrcode** (scanner) + **qrcode.react** (asset QR codes) |
-| Notifications/UI   | **Sonner** (toasts), Web Push subscription via service worker |
-| Theming            | **next-themes** (light/dark) |
-| HTTP / data        | **axios** (with `withCredentials`), SWR / React Query available |
-| Forms/validation   | **react-hook-form** + **zod** |
-| Icons              | **lucide-react** |
-
-> **Responsive design:** layouts use fluid grids, `%` / viewport units and Tailwind
-> breakpoints (`sm md lg xl`) to rearrange, shrink and hide components per screen
-> size. Touch targets are ≥44px; the `/scan` page ships PWA meta tags so custodians
-> can add it to their home screen.
-
----
-
-## 2. Local Development Setup
-
-### Prerequisites
-
-- **Node.js** (v18 or higher) - [Download here](https://nodejs.org/)
-- **Yarn** (recommended) or npm - `npm install -g yarn`
-- **Git** - [Download here](https://git-scm.com/downloads)
-
-### Step-by-Step Setup
-
-1. **Navigate to the frontend directory:**
-   ```bash
-   cd frontend
-   ```
-
-2. **Install Node.js dependencies:**
-   ```bash
-   yarn install
-   # or with npm:
-   npm install
-   ```
-
-3. **Configure environment variables:**
-   Create a `.env` file by copying the example file:
-   ```bash
-   cp .env.example .env
-   ```
-   Then edit `.env` with your backend URL if needed (see [Environment Variables](#environment-variables) section)
-
-4. **Start the development server:**
-   ```bash
-   yarn start
-   # or with npm:
-   npm start
-   ```
-
-5. **Access the application:**
-   Open your browser and navigate to `http://localhost:3000`
-
-The development server will automatically reload when you make changes to the code.
-
-### Development Tools
-
-**Code Formatting and Linting:**
-```bash
-# Lint code
-yarn lint
-# or with npm:
-npm run lint
-
-# Fix linting issues
-yarn lint --fix
+```
+Browser / Mobile PWA Viewport
+  └── index.js (Theme Provider + Sonner Toaster)
+        └── App.js
+              ├── /login (Login Form with Email/Password & Google Sign-In)
+              └── ProtectedApp (AuthGate wrapping all authenticated views)
+                    └── Shell (Responsive Navigation + Dynamic Top Bar + Notifications)
+                          ├── Sidebar Navigation (Filtered by User RBAC Role)
+                          ├── Top Bar (Theme Toggle, Search, Notification Bell, User Avatar)
+                          └── <Routes> (12 Authenticated Pages + Fallback)
 ```
 
-**Running Tests:**
-```bash
-yarn test
-# or with npm:
-npm test
-```
+- **Consolidated Component Pattern**: The core application logic, Shell layout, and all 13 view components are neatly structured in `src/App.js` with shared design tokens and atomic utility styling.
+- **Wope & Geist Inspired Aesthetics**: Features clean borders, subtle hover interactions, Geist monospace data accents, and high-contrast dark/light mode switching.
+- **Client-Side RBAC Mirroring**: Mirrors the backend `ROLE_PERMISSIONS` dictionary to display only authorized navigation links and controls, while relying on the backend as the ultimate authority.
 
 ---
 
-## 3. Environment Variables
+## 📐 Archify Architecture Specifications
 
-Create a `.env` file by copying the example file:
-```bash
-cp .env.example .env
-```
-Then edit `.env` with your backend URL if needed. The example file contains the required variables with placeholder values.
+The frontend interacts with the system through 5 architecture models defined in `docs/architecture/`:
 
-**Required Variables:**
-- `REACT_APP_BACKEND_URL` - Backend API URL (e.g., http://localhost:8001)
-- `REACT_APP_GOOGLE_CLIENT_ID` - Google OAuth client ID (optional)
-
-**Important Notes:**
-- Never commit the `.env` file to version control
-- The backend URL must include the protocol (http:// or https://)
-- In production, use HTTPS for secure connections
-- The frontend expects the backend to be accessible at the configured URL
+1. **[System Architecture](file:///d:/projects/CampusX/docs/architecture/system-architecture.html)**: Shows how React SPA and Mobile PWA connect to the FastAPI Ingress.
+2. **[Maintenance Workflow](file:///d:/projects/CampusX/docs/architecture/maintenance-workflow.html)**: Shows how users report issues and track Kanban transitions.
+3. **[QR Checkout Sequence](file:///d:/projects/CampusX/docs/architecture/qr-checkout.html)**: Traces the `/scan` camera interaction and checkout API handshakes.
+4. **[Asset Dataflow](file:///d:/projects/CampusX/docs/architecture/asset-dataflow.html)**: Maps UI state mutations into MongoDB Atlas and the Activity Log.
+5. **[Asset Lifecycle](file:///d:/projects/CampusX/docs/architecture/asset-lifecycle.html)**: Illustrates the visual badge states for physical assets.
 
 ---
 
-## 4. Project Structure
+## 📁 Directory Layout
 
 ```
 frontend/
-├── craco.config.js        # CRA override (aliases, tailwind)
-├── tailwind.config.js
-├── public/                # index.html (PWA meta), service worker, icons
-└── src/
-    ├── index.js           # React root, providers
-    ├── App.js             # ⭐ ALL pages, routing, Shell layout, API client
-    ├── App.css / index.css
-    ├── components/ui/      # shadcn/ui library (button, dialog, table, tabs, …)
-    ├── hooks/use-toast.js
-    ├── lib/utils.js        # cn() classnames helper
-    └── constants/testIds/  # stable data-testid selectors for tests
+├── public/                            # Static assets, PWA manifest, and service worker
+│   ├── index.html                     # HTML5 template with PWA viewport and meta tags
+│   └── sw.js                          # Service worker for Web Push notification handling
+├── src/
+│   ├── App.js                         # ⭐ Master application: Shell, Router, API client, all 13 pages
+│   ├── index.js                       # Application entry point, ThemeProvider, and Toaster
+│   ├── App.css                        # Platform utility CSS, Geist font tokens, and layout styles
+│   ├── index.css                      # Tailwind base and theme variables
+│   ├── components/
+│   │   ├── OrbitTrails.jsx            # Animated canvas hero graphic
+│   │   └── ui/                        # 40+ shadcn/ui components (Button, Dialog, Tabs, Table, etc.)
+│   ├── hooks/
+│   │   └── use-toast.js               # Toast notification hook
+│   ├── lib/
+│   │   └── utils.js                   # Classname merge utility (clsx + twMerge)
+│   └── constants/
+│       └── testIds/                   # Stable data-testid selectors for automated tests
+│           ├── auth.js
+│           ├── home.js
+│           └── index.js
+├── plugins/
+│   └── health-check/                  # Build-time and runtime health monitoring plugins
+├── craco.config.js                    # CRA configuration override (Tailwind + aliases)
+├── tailwind.config.js                 # Tailwind CSS configuration and color tokens
+├── postcss.config.js                  # PostCSS plugins
+├── components.json                    # shadcn/ui CLI configuration
+├── jsconfig.json                      # Path aliases mapping (@/* -> src/*)
+├── package.json                       # Dependencies and build scripts
+└── README.md                          # Frontend documentation (this file)
 ```
 
-> The app is intentionally consolidated in **`src/App.js`**: each page is a function
-> component defined in that file, wrapped by a shared `Shell` (sidebar + top bar +
-> notification bell) and guarded by `ProtectedApp`.
+---
+
+## 🗺 Routing & Application Pages
+
+All authenticated routes are rendered within the `Shell` layout component.
+
+| Route | Component | Required Role / Permission | Purpose |
+|---|---|---|---|
+| `/login` | `Login` | Public | Email/password sign-in and Google OAuth login |
+| `/dashboard` | `Dashboard` | Authenticated | Executive KPIs, asset health, and live activity stream |
+| `/inventory` | `Inventory` | Authenticated | Searchable asset catalog with category and status filters |
+| `/inventory/:asset_id` | `AssetDetail` | Authenticated | Hardware specs, QR code display, and check-out/in modals |
+| `/bookings` | `Bookings` | `booking` | Calendar scheduler for labs, halls, and equipment |
+| `/maintenance` | `Maintenance` | `maintenance_write` | Drag-and-drop Kanban board with Cloudinary photo uploads |
+| `/audits` | `Audits` | `audit` | Departmental audit runs, reconciliation, and PDF export |
+| `/nodues` | `NoDues` | `nodues` | Student clearance tracking across campus departments |
+| `/reports` | `Reports` | `reports` | Operational and NAAC/NBA accreditation report downloads |
+| `/activity` | `ActivityPage` | Authenticated | Complete audit log with filters for alerts and approvals |
+| `/digest` | `DigestPage` | `admin` | Monday executive briefing with print-friendly layout |
+| `/admin` | `Admin` | `admin` | Departments, categories, roles, delegations, seed dataset |
+| `/scan` | `ScanPage` | Authenticated | Mobile camera barcode/QR scanner for rapid field checkout |
+| `*` | `Dashboard` | Authenticated | Fallback route redirecting to Dashboard |
 
 ---
 
-## 5. Routing & Pages
+## 🌐 API Client & Authentication
 
-All authenticated routes render inside `Shell`. Unauthenticated users are sent to
-`/login`.
+The frontend communicates with the backend via the unified `api(path, options)` helper in `src/App.js`:
 
-| Route                     | Component      | Purpose |
-|---------------------------|----------------|---------|
-| `/login`                  | `Login`        | Email/password + "Continue with Google" (Emergent-managed OAuth) |
-| `/dashboard`              | `Dashboard`    | KPI cards + live activity feed |
-| `/inventory`              | `Inventory`    | Asset register: search, status/category filters |
-| `/inventory/:asset_id`    | `AssetDetail`  | Asset details, QR code, check-out / check-in |
-| `/bookings`               | `Bookings`     | Reserve bookable assets |
-| `/maintenance`            | `Maintenance`  | Kanban board (drag & drop) + Advance dropdown + photos |
-| `/audits`                 | `Audits`       | Audit runs, item conditions, evidence photos, close→PDF |
-| `/nodues`                 | `NoDues`       | Student clearance by department |
-| `/reports`                | `Reports`      | Operational + NAAC/NBA accreditation export (PDF/CSV) |
-| `/activity`               | `ActivityPage` | Full audit log |
-| `/digest`                 | `DigestPage`   | Admin weekly digest (Print / PDF) |
-| `/admin`                  | `Admin`        | Departments, categories, users/roles, delegations, imports, branding, role-preview |
-| `/scan`                   | `ScanPage`     | Mobile QR scan → check-out / check-in |
-| `*`                       | `Dashboard`    | Fallback |
+```javascript
+const API = `${process.env.REACT_APP_BACKEND_URL || ""}/api`;
 
-### How the pages connect
-
-```
-index.js
-  └── App (theme + toaster providers)
-        └── ProtectedApp        # calls GET /api/auth/me on load
-              ├── (no session) → <Login/>
-              └── (session)    → <Shell user=…>
-                                    ├── Sidebar nav (role-filtered links)
-                                    ├── NotificationBell (feed + push)
-                                    └── <Routes> … page components …
-```
-
-- **`ProtectedApp`** bootstraps auth: it requests `GET /api/auth/me`. On success it
-  stores the `user` (name, role, department) and renders the shell; on 401 it shows `Login`.
-- **`Shell`** receives `user` and shows only the nav links the role is allowed to
-  see, plus the logout action and the notification bell.
-- **Role gating** in the UI mirrors backend `ROLE_PERMISSIONS`; the backend remains
-  the source of truth (any blocked API call returns 403).
-
----
-
-## 6. API Client & Auth Flow
-
-- Base URL: **`process.env.REACT_APP_BACKEND_URL` + `/api`** (never hardcoded).
-- All requests use **`withCredentials: true`** so the httpOnly `session_token`
-  cookie is sent automatically.
-- **Email/password:** `POST /api/auth/login` → sets cookie → app reloads user.
-- **Google:** redirects to Emergent-managed auth, returns with a session id which is
-  exchanged via `POST /api/auth/session` (sets the same cookie). New Google users
-  start as Student/Pending.
-- **Logout:** `POST /api/auth/logout` clears the cookie.
-
----
-
-## 7. Feature Notes
-
-- **Maintenance Kanban** — columns are drag-and-drop (`@hello-pangea/dnd`). Each card
-  has an **Advance** dropdown: *Move to next stage / Move to Resolved / Reject / Delete*.
-  Resolved cards are auto-purged 30 days after resolution (enforced backend-side).
-  Photos upload directly to Cloudinary using a signature fetched from the backend.
-- **Scan** — `html5-qrcode` reads an asset tag, looks it up via
-  `GET /api/assets/by-tag/{tag}`, then checks the asset out/in. Optimised for
-  one-handed mobile use.
-- **Reports / Digest** — call the backend PDF/CSV endpoints and stream the file to the
-  browser for download or print.
-- **Push notifications** — the app fetches the VAPID public key, subscribes via the
-  service worker, and posts the subscription to `POST /api/push/subscribe`.
-
----
-
-## 8. Component Library
-
-The application uses **shadcn/ui** components built on Radix UI primitives. These are located in `src/components/ui/`.
-
-**Available Components:**
-- Button
-- Dialog
-- Table
-- Tabs
-- Form
-- Input
-- Select
-- Dropdown Menu
-- Avatar
-- Card
-- Alert
-- Toast (via Sonner)
-- And many more...
-
-**Usage Example:**
-```jsx
-import { Button } from './components/ui/button'
-
-function MyComponent() {
-  return <Button>Click me</Button>
-}
+const api = async (path, options = {}) => {
+  const res = await fetch(`${API}${path}`, {
+    credentials: "include", // Ensures httpOnly session_token cookie is transmitted
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options,
+  });
+  // Handles errors and extracts FastAPI 422 validation detail messages
+};
 ```
 
-All components follow the shadcn/ui conventions and are fully customizable via Tailwind CSS classes.
+- **Cookie-Based Sessions**: Requests automatically send the secure `session_token` cookie.
+- **Error Formatting**: Formats FastAPI 422 schema errors and detail strings cleanly into Sonner toast alerts.
+- **Google OAuth Flow**: The login page renders Google Sign-In buttons, which submit the Google ID token to `POST /api/auth/session` to obtain a session cookie.
 
 ---
 
-## 9. Styling & Theming
+## ✨ Key Features & Interactivity
 
-### Tailwind CSS
-
-The application uses Tailwind CSS for styling with a custom configuration in `tailwind.config.js`.
-
-**Key Features:**
-- Responsive design using mobile-first approach
-- Dark mode support via `next-themes`
-- Custom color palette and design tokens
-- Animation utilities via `tailwindcss-animate`
-
-### Theme Configuration
-
-**Light/Dark Mode:**
-- Theme switching is handled by `next-themes`
-- Theme preference is persisted in localStorage
-- System preference is respected by default
-
-**Custom Colors:**
-- Primary colors are configurable via the `branding` collection in the backend
-- Accent colors can be customized through the Admin console
-
-### Responsive Breakpoints
-
-- `sm`: 640px and up
-- `md`: 768px and up
-- `lg`: 1024px and up
-- `xl`: 1280px and up
+- **Drag-and-Drop Maintenance Kanban**: Built using `@hello-pangea/dnd`. Cards drag between *Open*, *In progress*, and *Resolved*. Each card includes an **Advance** dropdown (*Next Stage*, *Mark Resolved*, *Reject*, *Delete*).
+- **Direct Cloudinary Image Uploads**: Uploads bypass server memory bottlenecks. The client fetches a short-lived signature from `GET /api/uploads/signature` and uploads directly to Cloudinary via HTTPS.
+- **Interactive SVG QR Generation**: Every asset details page renders an SVG QR code via `qrcode.react`, allowing immediate label printing.
+- **Web Push Notifications**: Uses the browser `PushManager` and `public/sw.js` to subscribe devices to VAPID push alerts for high-priority incidents.
+- **Dark & Light Mode**: Controlled seamlessly via CSS variables (`--bg`, `--surface`, `--ink`, `--mute`) and toggleable from the navigation shell.
 
 ---
 
-## 10. Testing
+## 🧩 Component Architecture & UI Primitives
 
-### Running Tests
+The project includes 40+ modular shadcn/ui components located in `src/components/ui/`:
+
+- **Layout & Structure**: `card.jsx`, `dialog.jsx`, `sheet.jsx`, `drawer.jsx`, `tabs.jsx`, `separator.jsx`, `scroll-area.jsx`
+- **Actions & Forms**: `button.jsx`, `input.jsx`, `textarea.jsx`, `select.jsx`, `checkbox.jsx`, `dropdown-menu.jsx`, `form.jsx`
+- **Feedback & Visuals**: `badge.jsx`, `avatar.jsx`, `progress.jsx`, `skeleton.jsx`, `sonner.jsx`, `tooltip.jsx`
+- **Visual Motion**: `OrbitTrails.jsx` — interactive orbiting canvas graphic on the landing and login views.
+
+---
+
+## 📱 PWA & Mobile QR Workflow
+
+The `/scan` route is specifically engineered for campus field custodians:
+- **Camera-Based Scanning**: Utilizes `html5-qrcode` to decode physical asset tags in real time.
+- **Touch-First UI**: All primary buttons and action controls adhere to standard mobile touch targets (≥44px).
+- **PWA Meta Headers**: Includes `theme-color`, `mobile-web-app-capable`, and viewport settings in `public/index.html` allowing users to save AssetFlow directly to their home screens.
+
+---
+
+## 💻 Local Development Setup
 
 ```bash
-# Run tests in watch mode
-yarn test
-# or with npm:
-npm test
-```
+# 1. Install dependencies
+yarn install
+# or: npm install
 
-### Test Structure
+# 2. Configure environment
+cp .env.example .env
+# Ensure REACT_APP_BACKEND_URL=http://localhost:8001
 
-- **Component tests**: Test individual React components
-- **Integration tests**: Test page flows and user interactions
-- **E2E tests**: End-to-end testing with Playwright (if configured)
-
-### Test IDs
-
-The application uses stable `data-testid` selectors for testing, located in `src/constants/testIds/`. These provide reliable selectors for automated testing.
-
-### Testing Best Practices
-
-- Use `data-testid` attributes for selecting elements in tests
-- Test user behavior rather than implementation details
-- Mock API calls for unit and integration tests
-- Use React Testing Library for component testing
-
----
-
-## 11. Build & Deployment
-
-### Development Build
-
-```bash
-# Start development server
+# 3. Start development server
 yarn start
-# or with npm:
-npm start
+# or: npm start
 ```
+*The React application will be accessible at `http://localhost:3000`.*
 
-The development server runs on `http://localhost:3000` with hot module replacement.
+---
 
-### Production Build
+## 🧪 Testing & Quality Assurance
 
 ```bash
-# Create optimized production build
+# Run Jest / React Testing Library suites
+yarn test --watchAll=false
+
+# Run code linter
+yarn lint
+```
+
+The application provides stable `data-testid` attributes defined in `src/constants/testIds/` (e.g. `data-testid="login-email"`, `data-testid="trigger-seed-button"`), enabling resilient end-to-end and integration testing.
+
+---
+
+## 🚀 Build & Deployment
+
+```bash
+# Create optimized production bundle
 yarn build
-# or with npm:
-npm run build
+# or: npm run build
 ```
 
-The production build will be created in the `build/` directory.
-
-### Build Configuration
-
-- **CRACO** (Create React App Configuration Override) is used for custom build configuration
-- Configuration is defined in `craco.config.js`
-- Tailwind CSS is processed during the build
-- Environment variables are embedded at build time
-
-### Deployment
-
-**Static Hosting:**
-The `build/` directory can be deployed to any static hosting service:
-- Netlify
-- Vercel
-- AWS S3 + CloudFront
-- GitHub Pages
-
-**Docker Deployment:**
-Create a `Dockerfile`:
-
-```dockerfile
-FROM node:18-alpine as build
-WORKDIR /app
-COPY package*.json ./
-RUN yarn install
-COPY . .
-RUN yarn build
-
-FROM nginx:alpine
-COPY --from=build /app/build /usr/share/nginx/html
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
-```
-
-**Environment-Specific Builds:**
-- Create different `.env` files for each environment
-- Build with the appropriate environment variables
-- Deploy the build output to the corresponding environment
-
----
-
-## 12. Troubleshooting
-
-### Common Issues
-
-**Development server won't start:**
-- Ensure Node.js version is 18 or higher
-- Delete `node_modules` and `package-lock.json`, then reinstall
-- Check that port 3000 is not already in use
-- Verify `.env` file exists and is correctly configured
-
-**Build fails:**
-- Check for TypeScript errors in components
-- Verify all imports are correct
-- Ensure Tailwind CSS configuration is valid
-- Check that environment variables are set
-
-**Styles not loading:**
-- Verify Tailwind CSS is properly configured
-- Check that `craco.config.js` is correctly set up
-- Ensure PostCSS configuration is valid
-- Clear browser cache and restart dev server
-
-**API calls failing:**
-- Verify `REACT_APP_BACKEND_URL` is correct in `.env`
-- Check that backend is running and accessible
-- Ensure CORS is configured correctly on the backend
-- Check browser console for specific error messages
-
-**Components not rendering:**
-- Check for JavaScript errors in browser console
-- Verify component imports are correct
-- Ensure data is being fetched properly from the API
-- Check React DevTools for component state issues
-
-### Debug Mode
-
-Enable additional debugging by setting environment variables:
-
-```env
-REACT_APP_DEBUG=true
-```
-
-### Performance Optimization
-
-- Use React.memo for expensive components
-- Implement code splitting for large pages
-- Optimize images and assets
-- Use lazy loading for routes and components
-- Enable production build for performance testing
-
----
-
-## Key Dependencies
-
-The frontend uses the following key libraries (see `package.json` for full list):
-
-- **React 19** - UI library
-- **React Router 7** - Client-side routing
-- **Tailwind CSS** - Utility-first CSS framework
-- **shadcn/ui** - Pre-built UI components
-- **Framer Motion** - Animation library
-- **Recharts** - Charting library
-- **@hello-pangea/dnd** - Drag and drop functionality
-- **html5-qrcode** - QR code scanning
-- **qrcode.react** - QR code generation
-- **axios** - HTTP client
-- **react-hook-form** - Form management
-- **zod** - Schema validation
-- **swr** - Data fetching and caching
-- **sonner** - Toast notifications
-- **next-themes** - Theme management
-
----
-
-## PWA Features
-
-The application includes Progressive Web App (PWA) features for mobile users:
-
-- **Service Worker** - Enables offline functionality and background sync
-- **Web App Manifest** - Allows installation on mobile devices
-- **Responsive Design** - Optimized for mobile touch targets (≥44px)
-- **Push Notifications** - Real-time alerts for maintenance and updates
-- **Add to Home Screen** - Users can install the app on their devices
-
-The `/scan` page is specifically optimized for mobile PWA usage with large touch targets and simplified interface.
+The output in `build/` is static and can be deployed directly to Vercel, Netlify, AWS S3/CloudFront, or served via Nginx.
